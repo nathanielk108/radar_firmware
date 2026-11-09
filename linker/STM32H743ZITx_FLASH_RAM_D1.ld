@@ -46,8 +46,9 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   ITCMRAM    (xrw)    : ORIGIN = 0x00000000,   LENGTH = 64K
-  RAM    (xrw)    : ORIGIN = 0x24000000,   LENGTH = 128K
-  ROM    (rx)    : ORIGIN = 0x08000000,   LENGTH = 2048K
+  RAM        (xrw)    : ORIGIN = 0x24000000,   LENGTH = 128K
+  DMA_RAM    (xrw)    : ORIGIN = 0x30000000,   LENGTH = 64K   /* Custom section for dma buffers for radar firmware */
+  ROM        (rx)     : ORIGIN = 0x08000000,   LENGTH = 2048K
 }
 
 /* Sections */
@@ -176,6 +177,17 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+
+  /* Custom section for dma buffer for radar firmware */
+  .dma_buffer (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __dma_buffer_start__ = .;
+    KEEP(*(.dma_buffer))
+    KEEP(*(.dma_buffer*))
+    . = ALIGN(32);
+    __dma_buffer_end__ = .;
+  } >DMA_RAM
 
   /* Remove information from the compiler libraries */
   /DISCARD/ :

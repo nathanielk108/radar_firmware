@@ -53,6 +53,7 @@ target_link_options(mcu_options INTERFACE
 target_compile_definitions(mcu_options INTERFACE
   STM32H743xx
   HSE_VALUE=25000000U
+  USE_PWR_LDO_SUPPLY
   ARM_MATH_CM7
 )
 
@@ -78,9 +79,20 @@ target_compile_options(CMSISDSP PRIVATE
 )
 
 # Firmware
-add_executable(radar_firmware
+set(FIRMWARE_SOURCES
   src/main.c
+  src/platform/clock.c
+  src/platform/core.c
+  src/platform/debug_swo.c
+  src/platform/fault.c
+  src/platform/time.c
+  src/platform/gpio.c
+  src/platform/mpu.c
+  src/board/board_power.c
+)
 
+add_executable(radar_firmware
+  ${FIRMWARE_SOURCES}
   ${CMSIS_DEVICE}/Source/Templates/system_stm32h7xx.c
   ${CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32h743xx.s
 )
@@ -90,9 +102,9 @@ set_target_properties(radar_firmware
 )
 
 target_include_directories(radar_firmware PRIVATE
+  ${PROJECT_ROOT}/include
   ${CMSIS_CORE}/Include
   ${CMSIS_DEVICE}/Include
-  ${PROJECT_ROOT}/include
 )
 
 target_link_libraries(radar_firmware PRIVATE
@@ -146,4 +158,29 @@ add_custom_command(
 
   COMMAND ${CMAKE_SIZE}
     $<TARGET_FILE:radar_firmware>
+)
+
+# Flashing and Debugging
+
+set(PROGRAMMER "openocd")
+set(INTERFACE_CONFIG "interface/stlink.cfg")
+set(TARGET_CONFIG "target/stm32h7x.cfg")
+set(DEBUGGER "gdb-multiarch")
+
+add_custom_target(
+  flash
+  DEPENDS radar_firmware
+)
+
+add_custom_command(
+  TARGET flash
+  POST_BUILD
+  COMMAND ${PROGRAMMER}
+    -f ${INTERFACE_CONFIG}
+    -f ${TARGET_CONFIG}
+    -c "adapter speed 1000"
+    -c "transport select swd"
+    -c "program $<TARGET_FILE:radar_firmware> verify reset exit"
+  COMMENT "Program Target with OpenOCD"
+  VERBATIM
 )

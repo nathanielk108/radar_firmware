@@ -1,0 +1,19 @@
+source [find interface/stlink.cfg]
+transport select swd
+source [find target/stm32h7x.cfg]
+
+transport select swd
+adapter speed 1000
+
+stm32h7x.swo configure \
+  -protocol uart \
+  -traceclk 480000000 \
+  -pin-freq 2000000 \
+  -output :3443
+
+stm32h7x.cpu0 itm port 0 on
+stm32h7x.swo enable
+
+stm32h7x.cpu0 configure -event reset-end {
+  stm32h7x.swo enable
+}
