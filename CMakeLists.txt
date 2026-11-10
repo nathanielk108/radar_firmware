@@ -22,6 +22,10 @@ set(CMSIS_DSP
   ${PROJECT_ROOT}/vendor/CMSIS-DSP
 )
 
+set(TINYUSB
+  ${PROJECT_ROOT}/vendor/tinyusb
+)
+
 set(LINKER_SCRIPT
   ${PROJECT_ROOT}/linker/STM32H743ZITx_FLASH_RAM_D1.ld
 )
@@ -88,11 +92,25 @@ set(FIRMWARE_SOURCES
   src/platform/time.c
   src/platform/gpio.c
   src/platform/mpu.c
+  src/platform/usb.c
+  src/platform/spi.c
   src/board/board_power.c
+  src/board/board_spi.c
+  src/usb/usb_descriptors.c
+)
+
+set(TINYUSB_SOURCES
+  ${TINYUSB}/src/tusb.c
+  ${TINYUSB}/src/common/tusb_fifo.c
+  ${TINYUSB}/src/device/usbd.c
+  ${TINYUSB}/src/class/cdc/cdc_device.c
+  ${TINYUSB}/src/portable/synopsys/dwc2/dcd_dwc2.c
+  ${TINYUSB}/src/portable/synopsys/dwc2/dwc2_common.c
 )
 
 add_executable(radar_firmware
   ${FIRMWARE_SOURCES}
+  ${TINYUSB_SOURCES}
   ${CMSIS_DEVICE}/Source/Templates/system_stm32h7xx.c
   ${CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32h743xx.s
 )
@@ -103,6 +121,7 @@ set_target_properties(radar_firmware
 
 target_include_directories(radar_firmware PRIVATE
   ${PROJECT_ROOT}/include
+  ${TINYUSB}/src
   ${CMSIS_CORE}/Include
   ${CMSIS_DEVICE}/Include
 )

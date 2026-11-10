@@ -7,3 +7,6 @@
 [submodule "vendor/CMSIS-DSP"]
 	path = vendor/CMSIS-DSP
 	url = https://github.com/ARM-software/CMSIS-DSP.git
+[submodule "vendor/tinyusb"]
+	path = vendor/tinyusb
+	url = https://github.com/hathach/tinyusb

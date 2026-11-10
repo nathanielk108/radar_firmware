@@ -36,7 +36,6 @@ static void gpio_enable_clock(GPIO_TypeDef *port) {
   }
 
   (void)RCC->AHB4ENR;
-  (void)RCC->AHB4ENR;
 }
 
 void gpio_init(const gpio_config_t *config) {

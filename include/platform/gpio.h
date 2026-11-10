@@ -6,28 +6,28 @@
 #include <stdbool.h>
 
 typedef enum {
-  GPIO_MODE_INPUT     = 0,
-  GPIO_MODE_OUTPUT    = 1,
-  GPIO_MODE_ALTERNATE = 2,
-  GPIO_MODE_ANALOG    = 3,
+  GPIO_MODE_INPUT     = 0U,
+  GPIO_MODE_OUTPUT    = 1U,
+  GPIO_MODE_ALTERNATE = 2U,
+  GPIO_MODE_ANALOG    = 3U,
 } gpio_mode_t;
 
 typedef enum {
-  GPIO_PUSH_PULL  = 0,
-  GPIO_OPEN_DRAIN = 1,
+  GPIO_PUSH_PULL  = 0U,
+  GPIO_OPEN_DRAIN = 1U,
 } gpio_output_type_t;
 
 typedef enum {
-  GPIO_PULL_NONE = 0,
-  GPIO_PULL_UP   = 1,
-  GPIO_PULL_DOWN = 2,
+  GPIO_PULL_NONE = 0U,
+  GPIO_PULL_UP   = 1U,
+  GPIO_PULL_DOWN = 2U,
 } gpio_pull_t;
 
 typedef enum {
-  GPIO_SPEED_LOW       = 0,
-  GPIO_SPEED_MEDIUM    = 1,
-  GPIO_SPEED_HIGH      = 2,
-  GPIO_SPEED_VERY_HIGH = 3,
+  GPIO_SPEED_LOW       = 0U,
+  GPIO_SPEED_MEDIUM    = 1U,
+  GPIO_SPEED_HIGH      = 2U,
+  GPIO_SPEED_VERY_HIGH = 3U,
 } gpio_speed_t;
 
 typedef struct {

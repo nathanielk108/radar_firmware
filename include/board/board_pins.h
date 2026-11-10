@@ -2,6 +2,8 @@
 
 #include "stm32h7xx.h"
 
+// POWER
+
 #define RF_5V_EN_PORT GPIOB
 #define RF_5V_EN_PIN 5U
 
@@ -20,5 +22,62 @@
 #define BATT_INT_PORT GPIOG
 #define BATT_INT_PIN 0U
 
+// USB
+
+#define USB_DP_PORT GPIOA
+#define USB_DP_PIN 12U
+#define USB_DN_PORT GPIOA
+#define USB_DN_PIN 11U
+#define USB_VBUS_PORT GPIOA
+#define USB_VBUS_PIN 9U
+
+// SPI
+
+#define IMU1_SPI SPI1
+
+#define IMU1_SPI_SCK_PORT GPIOA
+#define IMU1_SPI_SCK_PIN 5U
+#define IMU1_SPI_SCK_AF 5U
+
+#define IMU1_SPI_MISO_PORT GPIOA
+#define IMU1_SPI_MISO_PIN 6U
+#define IMU1_SPI_MISO_AF 5U
+
+#define IMU1_SPI_MOSI_PORT GPIOA
+#define IMU1_SPI_MOSI_PIN 7U
+#define IMU1_SPI_MOSI_AF 5U
+
+#define IMU1_CS_PORT GPIOC
+#define IMU1_CS_PIN 4U
+
+#define IMU2_SPI SPI2
+
+#define IMU2_SPI_SCK_PORT GPIOB
+#define IMU2_SPI_SCK_PIN 13U
+#define IMU2_SPI_SCK_AF 5U
+
+#define IMU2_SPI_MISO_PORT GPIOB
+#define IMU2_SPI_MISO_PIN 14U
+#define IMU2_SPI_MISO_AF 5U
+
+#define IMU2_SPI_MOSI_PORT GPIOB
+#define IMU2_SPI_MOSI_PIN 15U
+#define IMU2_SPI_MOSI_AF 5U
+
+#define IMU2_CS_PORT GPIOB
+#define IMU2_CS_PIN 12U
+
 #define FREQ_LE_PORT GPIOA
 #define FREQ_LE_PIN 3U
+
+// I2C
+
+#define BATT_SCL_PORT GPIOF
+#define BATT_SCL_PIN 14U
+#define BATT_SCL_AF 4U
+
+#define BATT_SDA_PORT GPIOF
+#define BATT_SDA_PIN 15U
+#define BATT_SDA_AF 4U
+
+

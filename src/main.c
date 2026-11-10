@@ -3,13 +3,19 @@
 #include "platform/clock.h"
 #include "platform/core.h"
 #include "platform/debug_swo.h"
-#include "platform/fault.h"
 #include "platform/time.h"
-#include "platform/gpio.h"
 #include "platform/mpu.h"
+#include "platform/usb.h"
+#include "platform/gpio.h"
+#include "platform/spi.h"
+#include "platform/i2c.h"
 
 #include "board/board_pins.h"
 #include "board/board_power.h"
+#include "board/board_spi.h"
+#include "board/board_i2c.h"
+
+#include "tusb.h"
 
 int main(void) {
 
@@ -36,7 +42,10 @@ int main(void) {
 
   board_power_init();
 
-  uint32_t start;
+  if (!usb_init()) {
+    debug_swo_write("USB initialization failed\r\n");
+    while (1) {}
+  }
 
   // start = time_ms();
   // board_rf_5v_enable(true);
@@ -48,19 +57,43 @@ int main(void) {
   // while (!time_expired(start, 500)) {}
   // debug_swo_write("15V Enabled\r\n");
 
-  __attribute__((section(".dma_buffer"), aligned(32), used))
-  static volatile uint16_t test_dma_buffer[2];
+  board_spi_init();
+  if (spi_init(&imu1_spi_config) != SPI_STATUS_OK || spi_init(&imu2_spi_config) != SPI_STATUS_OK) {
+    debug_swo_write("IMU SPI initialization failed\r\n");
+    while (1) {}
+  }
 
-  static volatile uint16_t test_stack_buffer[2];
+  board_i2c_init();
+  if (i2c_init(&batt_i2c_config) != I2C_STATUS_OK) {
+    debug_swo_write("BATT I2C initialization failed\r\n");
+    while (1) {}
+  }
 
-  test_dma_buffer[0] = 0x1234;
-  test_dma_buffer[1] = 0xA5A5;
+  uint8_t tx[] = { 0x80, 0x00, 0x00 };
 
-  test_stack_buffer[0] = 0x1234;
-  test_stack_buffer[1] = 0xA5A5;
+  uint8_t rx[sizeof(tx)];
 
+  char buffer[1024];
+  uint32_t start = time_ms();
   while (1) {
+    tud_task();
+    if (usb_console_connected()) {
+      uint32_t read = usb_console_read(buffer, sizeof(buffer) - 1);
+      buffer[read] = '\0';
+      usb_console_write(buffer);
+    }
     if (time_expired(start, 1000)) {
+      gpio_write(IMU2_CS_PORT, IMU2_CS_PIN, false);
+      spi_status_t result = spi_transfer(&imu2_spi_config, tx, rx, 3, 100);
+      gpio_write(IMU2_CS_PORT, IMU2_CS_PIN, true);
+      debug_swo_hex32((uint32_t)result);
+      debug_swo_write("\r\n");
+      debug_swo_hex32(rx[0]);
+      debug_swo_write("\r\n");
+      debug_swo_hex32(rx[1]);
+      debug_swo_write("\r\n");
+      debug_swo_hex32(rx[2]);
+      debug_swo_write("\r\n\r\n");
       start = time_ms();
     }
   }
