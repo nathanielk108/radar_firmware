@@ -28,8 +28,8 @@ static bool spi_enable_clock(SPI_TypeDef *spi) {
     return true;
   }
   else if (spi == SPI6) {
-    RCC->APB3ENR |= RCC_APB4ENR_SPI6EN;
-    (void)RCC->APB3ENR;
+    RCC->APB4ENR |= RCC_APB4ENR_SPI6EN;
+    (void)RCC->APB4ENR;
     return true;
   }
 

@@ -70,6 +70,12 @@
 #define FREQ_LE_PORT GPIOA
 #define FREQ_LE_PIN 3U
 
+#define FREQ_CLK_PORT GPIOF
+#define FREQ_CLK_PIN 1U
+
+#define FREQ_DATA_PORT GPIOF
+#define FREQ_DATA_PIN 0U
+
 // I2C
 
 #define BATT_SCL_PORT GPIOF

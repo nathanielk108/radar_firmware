@@ -94,9 +94,13 @@ set(FIRMWARE_SOURCES
   src/platform/mpu.c
   src/platform/usb.c
   src/platform/spi.c
+  src/platform/i2c.c
   src/board/board_power.c
   src/board/board_spi.c
+  src/board/board_i2c.c
   src/usb/usb_descriptors.c
+  src/drivers/bq25883.c
+  src/drivers/adf4158.c
 )
 
 set(TINYUSB_SOURCES

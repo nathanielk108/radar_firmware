@@ -15,7 +15,10 @@
 #include "board/board_spi.h"
 #include "board/board_i2c.h"
 
-#include "tusb.h"
+#include "drivers/bq25883.h"
+#include "drivers/adf4158.h"
+
+#include "device/usbd.h"
 
 int main(void) {
 
@@ -69,9 +72,11 @@ int main(void) {
     while (1) {}
   }
 
-  uint8_t tx[] = { 0x80, 0x00, 0x00 };
+  uint8_t reg = 0x0D;
+  uint8_t value;
 
-  uint8_t rx[sizeof(tx)];
+  uint8_t tx[2] = { 0x8F, 0x00 };
+  uint8_t rx[2] = {0};
 
   char buffer[1024];
   uint32_t start = time_ms();
@@ -83,17 +88,22 @@ int main(void) {
       usb_console_write(buffer);
     }
     if (time_expired(start, 1000)) {
-      gpio_write(IMU2_CS_PORT, IMU2_CS_PIN, false);
-      spi_status_t result = spi_transfer(&imu2_spi_config, tx, rx, 3, 100);
-      gpio_write(IMU2_CS_PORT, IMU2_CS_PIN, true);
-      debug_swo_hex32((uint32_t)result);
+      gpio_write(IMU1_CS_PORT, IMU1_CS_PIN, false);
+      spi_status_t status = spi_transfer(&imu1_spi_config, tx, rx, 2, 100);
+      gpio_write(IMU1_CS_PORT, IMU1_CS_PIN, true);
+      debug_swo_write("status = ");
+      debug_swo_hex32(status);
       debug_swo_write("\r\n");
+      debug_swo_write("rx = ");
       debug_swo_hex32(rx[0]);
-      debug_swo_write("\r\n");
+      debug_swo_write(", ");
       debug_swo_hex32(rx[1]);
       debug_swo_write("\r\n");
-      debug_swo_hex32(rx[2]);
-      debug_swo_write("\r\n\r\n");
+      // i2c_status_t status = bq25883_read_register(&batt_i2c_config, reg, &value);
+      // debug_swo_hex32(status);
+      // debug_swo_write(" ");
+      // debug_swo_hex32(value);
+      // debug_swo_write("\r\n");
       start = time_ms();
     }
   }
