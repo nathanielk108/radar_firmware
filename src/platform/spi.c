@@ -200,11 +200,16 @@ spi_status_t spi_transfer(
     if ((config == NULL) ||
         (config->spi == NULL) ||
         (frame_count == 0U) ||
+        (timeout_ms == 0U) ||
+        (config->data_size < 4U) || (config->data_size > 32U) ||
         (config->communication != SPI_COMM_FULL_DUPLEX)) {
         return SPI_STATUS_INVALID_ARGUMENT;
     }
 
     SPI_TypeDef *spi = config->spi;
+    if ((spi->CR1 & SPI_CR1_SPE) == 0U) {
+        return SPI_STATUS_INVALID_ARGUMENT;
+    }
 
     uint16_t tx_count = 0U;
     uint16_t rx_count = 0U;
@@ -243,11 +248,13 @@ spi_status_t spi_transfer(
          */
         if ((status & SPI_SR_OVR) != 0U) {
             spi->IFCR = SPI_IFCR_OVRC;
+            spi->CR1 &= ~SPI_CR1_SPE;
             return SPI_STATUS_OVERRUN;
         }
 
         if ((status & SPI_SR_MODF) != 0U) {
             spi->IFCR = SPI_IFCR_MODFC;
+            spi->CR1 &= ~SPI_CR1_SPE;
             return SPI_STATUS_MODE_FAULT;
         }
 
@@ -277,25 +284,13 @@ spi_status_t spi_transfer(
             ++rx_count;
         }
 
-        /*
-         * At EOT, final received data may remain in RxFIFO
-         * even though RXP is no longer asserted.
-         */
-        if ((status & SPI_SR_EOT) != 0U) {
-
-            while (rx_count < frame_count) {
-
-                uint32_t value = spi_read_frame(spi, config->data_size);
-
-                store_rx_frame(rx, rx_count, config->data_size, value);
-
-                ++rx_count;
-            }
-
+        /* Only consume receive frames when RXP says data is available. */
+        if (((status & SPI_SR_EOT) != 0U) && (rx_count == frame_count)) {
             break;
         }
 
         if (time_elapsed_ms(start) >= timeout_ms) {
+            spi->CR1 &= ~SPI_CR1_SPE;
             return SPI_STATUS_TIMEOUT;
         }
     }
@@ -305,6 +300,7 @@ spi_status_t spi_transfer(
      */
     while ((spi->SR & SPI_SR_EOT) == 0U) {
         if (time_elapsed_ms(start) >= timeout_ms) {
+            spi->CR1 &= ~SPI_CR1_SPE;
             return SPI_STATUS_TIMEOUT;
         }
     }
@@ -313,3 +309,4 @@ spi_status_t spi_transfer(
 
     return SPI_STATUS_OK;
 }
+

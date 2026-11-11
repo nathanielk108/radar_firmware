@@ -2,6 +2,11 @@
 #include "board/board_pins.h"
 #include "platform/gpio.h"
 
+const i2c_config_t batt_i2c_config = {
+  .i2c = I2C4,
+  .timing = I2C_TIMING_100KHZ
+};
+
 void board_i2c_init(void) {
 
   gpio_config_t batt_scl = {
@@ -27,3 +32,4 @@ void board_i2c_init(void) {
   gpio_init(&batt_scl);
   gpio_init(&batt_sda);
 }
+

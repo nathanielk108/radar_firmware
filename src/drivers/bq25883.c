@@ -33,6 +33,10 @@ static bq25883_status_t bq25883_write_reg(
     uint8_t reg,
     uint8_t value)
 {
+    if ((dev == NULL) || (dev->i2c == NULL)) {
+        return BQ25883_ERROR_I2C;
+    }
+
     uint8_t data[2] = {
         reg,
         value
@@ -53,55 +57,28 @@ static bq25883_status_t bq25883_write_reg(
 }
 
 static bq25883_status_t bq25883_write_verify(
-    const bq25883_t *dev,
-    uint8_t reg,
-    uint8_t value,
-    uint8_t mask)
+    const bq25883_t *dev, uint8_t reg, uint8_t value, uint8_t mask)
 {
-    bq25883_status_t status =
-        bq25883_write_reg(dev, reg, value);
-
-    if (status != BQ25883_OK) {
-        return status;
-    }
+    bq25883_status_t status = bq25883_write_reg(dev, reg, value);
+    if (status != BQ25883_OK) return status;
 
     uint8_t readback;
-
     status = bq25883_read_reg(dev, reg, &readback);
+    if (status != BQ25883_OK) return status;
 
-    if (status != BQ25883_OK) {
-        return status;
-    }
-
-    if ((readback & mask) != (value & mask)) {
-        return BQ25883_ERROR_VERIFY;
-    }
-
-    return BQ25883_OK;
+    return ((readback & mask) == (value & mask))
+        ? BQ25883_OK : BQ25883_ERROR_VERIFY;
 }
 
-
 static bq25883_status_t bq25883_update_bits(
-    const bq25883_t *dev,
-    uint8_t reg,
-    uint8_t mask,
-    uint8_t value)
+    const bq25883_t *dev, uint8_t reg, uint8_t mask, uint8_t value)
 {
     uint8_t current;
+    bq25883_status_t status = bq25883_read_reg(dev, reg, &current);
+    if (status != BQ25883_OK) return status;
 
-    bq25883_status_t status =
-        bq25883_read_reg(dev, reg, &current);
-
-    if (status != BQ25883_OK) {
-        return status;
-    }
-
-    uint8_t updated =
-        (current & (uint8_t)~mask) | (value & mask);
-
-    return bq25883_write_verify(
-        dev, reg, updated, mask
-    );
+    uint8_t updated = (uint8_t)((current & (uint8_t)~mask) | (value & mask));
+    return bq25883_write_verify(dev, reg, updated, mask);
 }
 
 bq25883_status_t bq25883_check_id(
@@ -135,29 +112,17 @@ bq25883_status_t bq25883_check_id(
 }
 
 bq25883_status_t bq25883_set_charge_enabled(
-    const bq25883_t *dev,
-    bool enable)
+    const bq25883_t *dev, bool enable)
 {
-    if (!enable) {
-        gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
-    }
+    /* Never assert active-low CE until the register write is verified. */
+    gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
 
     bq25883_status_t status = bq25883_update_bits(
-        dev,
-        BQ25883_REG_CTRL2,
-        1U << 3,
-        enable ? (1U << 3) : 0U
-    );
+        dev, BQ25883_REG_CTRL2, 1U << 3,
+        enable ? (1U << 3) : 0U);
+    if (status != BQ25883_OK) return status;
 
-    if (status != BQ25883_OK) {
-        gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
-        return status;
-    }
-
-    if (enable) {
-        gpio_write(BATT_CE_PORT, BATT_CE_PIN, false);
-    }
-
+    if (enable) gpio_write(BATT_CE_PORT, BATT_CE_PIN, false);
     return BQ25883_OK;
 }
 
@@ -195,11 +160,7 @@ bq25883_status_t bq25883_set_charge_voltage_mv(
     uint8_t code =
         (uint8_t)((mv - 6800U) / 10U);
 
-    return bq25883_write_reg(
-        dev,
-        BQ25883_REG_VREG,
-        code
-    );
+    return bq25883_write_verify(dev, BQ25883_REG_VREG, code, 0xFFU);
 }
 
 bq25883_status_t bq25883_set_charge_current_ma(
@@ -224,11 +185,7 @@ bq25883_status_t bq25883_set_charge_current_ma(
     reg &= 0xC0U;
     reg |= code & 0x3FU;
 
-    return bq25883_write_reg(
-        dev,
-        BQ25883_REG_ICHG,
-        reg
-    );
+    return bq25883_write_verify(dev, BQ25883_REG_ICHG, reg, 0x3FU);
 }
 
 bq25883_status_t bq25883_set_input_current_limit_ma(
@@ -254,11 +211,7 @@ bq25883_status_t bq25883_set_input_current_limit_ma(
     reg &= 0xE0U;
     reg |= code & 0x1FU;
 
-    return bq25883_write_reg(
-        dev,
-        BQ25883_REG_IINDPM,
-        reg
-    );
+    return bq25883_write_verify(dev, BQ25883_REG_IINDPM, reg, 0x1FU);
 }
 
 bq25883_status_t bq25883_set_precharge_termination_ma(
@@ -282,11 +235,7 @@ bq25883_status_t bq25883_set_precharge_termination_ma(
     uint8_t value =
         (uint8_t)((pre << 4U) | term);
 
-    return bq25883_write_reg(
-        dev,
-        BQ25883_REG_PRE_TERM,
-        value
-    );
+    return bq25883_write_verify(dev, BQ25883_REG_PRE_TERM, value, 0xFFU);
 }
 
 bq25883_status_t bq25883_adc_convert(
@@ -311,9 +260,11 @@ bq25883_status_t bq25883_adc_convert(
      * ADC_SAMPLE = 00: highest effective resolution
      * ADC_EN = 1
      */
-    ctrl &= ~0x30U;
-    ctrl |= (1U << 6);
-    ctrl |= (1U << 7);
+    // ctrl &= ~0x30U;
+    // ctrl |= (1U << 6);
+    // ctrl |= (1U << 7);
+    ctrl &= ~0x70U;  // Continuous mode, 15-bit resolution
+    ctrl |= 0x80U;   // Enable ADC
 
     status = bq25883_write_reg(
         dev,
@@ -325,27 +276,29 @@ bq25883_status_t bq25883_adc_convert(
         return status;
     }
 
-    uint32_t start = time_ms();
+    return BQ25883_OK;
 
-    do {
-        status =
-            bq25883_read_reg(
-                dev,
-                BQ25883_REG_ADC_CTRL,
-                &ctrl
-            );
-
-        if (status != BQ25883_OK) {
-            return status;
-        }
-
-        if ((ctrl & (1U << 7)) == 0U) {
-            return BQ25883_OK;
-        }
-
-    } while (!time_expired(start, timeout_ms));
-
-    return BQ25883_ERROR_TIMEOUT;
+    // uint32_t start = time_ms();
+    //
+    // do {
+    //     status =
+    //         bq25883_read_reg(
+    //             dev,
+    //             BQ25883_REG_ADC_CTRL,
+    //             &ctrl
+    //         );
+    //
+    //     if (status != BQ25883_OK) {
+    //         return status;
+    //     }
+    //
+    //     if ((ctrl & (1U << 7)) == 0U) {
+    //         return BQ25883_OK;
+    //     }
+    //
+    // } while (!time_expired(start, timeout_ms));
+    //
+    // return BQ25883_ERROR_TIMEOUT;
 }
 
 static bq25883_status_t bq25883_read_adc16(
@@ -363,9 +316,8 @@ static bq25883_status_t bq25883_read_adc16(
         return status;
     }
 
-    status = bq25883_read_reg(
-        dev, (uint8_t)(high_reg + 1U), &low
-    );
+    status =
+        bq25883_read_reg(dev, high_reg + 1U, &low);
 
     if (status != BQ25883_OK) {
         return status;
@@ -417,7 +369,7 @@ bq25883_status_t bq25883_get_snapshot(
         dev, BQ25883_REG_VSYS_H, &s->vsys_mv);
     if (status != BQ25883_OK) return status;
 
-    int16_t ichg;
+    uint16_t ichg;
 
     status = bq25883_read_adc16(
         dev, BQ25883_REG_ICHG_H, &ichg);
@@ -425,9 +377,11 @@ bq25883_status_t bq25883_get_snapshot(
 
     s->ichg_ma = (uint16_t)ichg;
 
+    uint16_t ibus_raw;
     status = bq25883_read_adc16(
-        dev, BQ25883_REG_IBUS_H, &s->ibus_ma);
+        dev, BQ25883_REG_IBUS_H, &ibus_raw);
     if (status != BQ25883_OK) return status;
+    s->ibus_ma = (int16_t)ibus_raw;
 
     status = bq25883_read_adc16(
         dev, BQ25883_REG_TDIE_H,
@@ -457,18 +411,12 @@ bq25883_status_t bq25883_get_snapshot(
     return BQ25883_OK;
 }
 
-static bool bq25883_ts_allows_charging(uint8_t ts)
-{
-    return ts == 0x00U;
-}
-
 bq25883_status_t bq25883_prepare_for_bringup(
     const bq25883_t *dev)
 {
-    bq25883_status_t status;
-    uint8_t part;
-
-    status = bq25883_check_id(dev, &part);
+    /* Hold the hardware inhibit before any I2C communication. */
+    gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
+    bq25883_status_t status = bq25883_check_id(dev, NULL);
     if (status != BQ25883_OK) return status;
 
     /*
@@ -511,3 +459,4 @@ bq25883_status_t bq25883_prepare_for_bringup(
      */
     return bq25883_set_charge_enabled(dev, false);
 }
+

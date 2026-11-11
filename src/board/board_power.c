@@ -21,16 +21,6 @@ board_power_state_t board_power_init(void) {
     .speed = GPIO_SPEED_LOW
   };
 
-  gpio_config_t batt_ce_conf = {
-    .port = BATT_CE_PORT,
-    .pin = BATT_CE_PIN,
-    .mode = GPIO_MODE_OUTPUT,
-    .output_type = GPIO_PUSH_PULL,
-    .pull = GPIO_PULL_NONE,
-    .speed = GPIO_SPEED_LOW,
-    .init_state = true
-  };
-
   gpio_config_t rf_5v_enable_conf = {
     .port = RF_5V_EN_PORT,
     .pin = RF_5V_EN_PIN,
@@ -51,9 +41,32 @@ board_power_state_t board_power_init(void) {
     .init_state = false
   };
 
+  /* The charger CE pin is active-low: inhibit charging at startup. */
+  gpio_config_t batt_ce_conf = {
+    .port = BATT_CE_PORT,
+    .pin = BATT_CE_PIN,
+    .mode = GPIO_MODE_OUTPUT,
+    .output_type = GPIO_PUSH_PULL,
+    .pull = GPIO_PULL_NONE,
+    .speed = GPIO_SPEED_LOW,
+    .init_state = true
+  };
+
+  gpio_config_t batt_int_conf = {
+    .port = BATT_INT_PORT,
+    .pin = BATT_INT_PIN,
+    .mode = GPIO_MODE_INPUT,
+    .output_type = GPIO_PUSH_PULL,
+    .pull = GPIO_PULL_NONE,
+    .speed = GPIO_SPEED_LOW
+  };
+
+  /* Configure CE before any charger communications. */
+  gpio_init(&batt_ce_conf);
+  gpio_init(&batt_int_conf);
+
   gpio_init(&efuse_pg_conf);
   gpio_init(&batt_pg_conf);
-  gpio_init(&batt_ce_conf);
   gpio_init(&rf_5v_enable_conf);
   gpio_init(&rf_15v_enable_conf);
 
@@ -79,3 +92,4 @@ bool board_battery_power_good(void) {
   // BQ25883 has active low power good output
   return !gpio_read(BATT_PG_PORT, BATT_PG_PIN);
 }
+

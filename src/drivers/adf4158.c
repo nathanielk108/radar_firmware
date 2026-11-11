@@ -73,3 +73,4 @@ void adf4158_write(uint32_t value) {
 
   gpio_write(FREQ_LE_PORT, FREQ_LE_PIN, false);
 }
+

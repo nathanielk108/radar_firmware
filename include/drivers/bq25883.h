@@ -88,12 +88,12 @@ typedef struct {
 
     uint8_t ts_status;
 
-    int16_t vbus_mv;
-    int16_t vbat_mv;
-    int16_t vsys_mv;
+    uint16_t vbus_mv;
+    uint16_t vbat_mv;
+    uint16_t vsys_mv;
     uint16_t ichg_ma;
     int16_t ibus_ma;
-    int16_t tdie_half_c;
+    uint16_t tdie_half_c;
 } bq25883_snapshot_t;
 
 bq25883_status_t bq25883_check_id(const bq25883_t *dev, uint8_t *part_info);
@@ -107,3 +107,4 @@ bq25883_status_t bq25883_set_precharge_termination_ma(const bq25883_t *dev, uint
 bq25883_status_t bq25883_adc_convert(const bq25883_t *dev, uint32_t timeout_ms);
 bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev, bq25883_snapshot_t *s);
 bq25883_status_t bq25883_prepare_for_bringup(const bq25883_t *dev);
+

@@ -86,8 +86,17 @@ void OTG_FS_IRQHandler(void) {
 }
 
 void usb_console_write(const char *str) {
+  if ((str == NULL) || !tud_cdc_connected()) return;
+
   while (*str != '\0') {
-    tud_cdc_write_char(*str++);
+    uint32_t available = tud_cdc_write_available();
+    if (available == 0U) break; /* Never wait indefinitely for USB host. */
+
+    uint32_t length = 0U;
+    while ((length < available) && (str[length] != '\0')) ++length;
+    uint32_t written = tud_cdc_write(str, length);
+    str += written;
+    if (written < length) break;
   }
   tud_cdc_write_flush();
 }
@@ -104,3 +113,4 @@ uint32_t usb_console_read(char *buffer, uint32_t len) {
 bool usb_console_connected() {
   return tud_cdc_connected();
 }
+
