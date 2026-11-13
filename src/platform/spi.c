@@ -1,5 +1,7 @@
 #include "platform/spi.h"
 #include "platform/time.h"
+#include "platform/gpio.h"
+#include "board/board_pins.h"
 
 static bool spi_enable_clock(SPI_TypeDef *spi) {
   if (spi == SPI1) {
@@ -113,7 +115,7 @@ static void store_rx_frame(void *buffer, uint16_t index, uint8_t data_size, uint
   }
 }
 
-spi_status_t spi_init(spi_config_t *config) {
+spi_status_t spi_init(const spi_config_t *config) {
   if ((config == NULL) || (config->spi == NULL) || (config->data_size < 4U) || (config->data_size > 32U)) {
     return SPI_STATUS_INVALID_ARGUMENT;
   }
@@ -308,5 +310,120 @@ spi_status_t spi_transfer(
     spi->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
 
     return SPI_STATUS_OK;
+}
+
+
+spi_status_t spi_transfer_pair(
+    const spi_config_t *master,
+    const spi_config_t *slave,
+    uint16_t tx,
+    uint16_t *master_rx,
+    uint16_t *slave_rx,
+    uint32_t timeout_ms)
+{
+    if (!master || !slave || !master_rx || !slave_rx ||
+        !timeout_ms || master->spi == slave->spi ||
+        master->role != SPI_ROLE_MASTER ||
+        slave->role != SPI_ROLE_SLAVE ||
+        master->communication != SPI_COMM_FULL_DUPLEX ||
+        slave->communication != SPI_COMM_RX_ONLY ||
+        master->data_size != 16U ||
+        slave->data_size != 16U ||
+        master->mode != slave->mode ||
+        master->bit_order != slave->bit_order ||
+        master->spi != SPI5 || slave->spi != SPI4) {
+        return SPI_STATUS_INVALID_ARGUMENT;
+    }
+
+    SPI_TypeDef *m = master->spi;
+    SPI_TypeDef *s = slave->spi;
+
+    // Start a fresh transaction on both peripherals.
+    m->CR1 &= ~SPI_CR1_SPE;
+    s->CR1 &= ~SPI_CR1_SPE;
+
+    m->CR2 = (m->CR2 & ~SPI_CR2_TSIZE_Msk) | 1U;
+    s->CR2 = (s->CR2 & ~SPI_CR2_TSIZE_Msk) | 1U;
+
+    uint32_t clear =
+        SPI_IFCR_EOTC | SPI_IFCR_TXTFC |
+        SPI_IFCR_OVRC | SPI_IFCR_MODFC;
+
+    m->IFCR = clear;
+    s->IFCR = clear;
+
+    // Arm the slave before starting the master.
+    s->CR1 |= SPI_CR1_SPE;
+    m->CR1 |= SPI_CR1_SPE;
+
+    // Preload the master's transmit FIFO.
+    spi_write_frame(m, tx, 16U);
+
+    // ADC CS also drives the SPI4 NSS input.
+    gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, false);
+
+    m->CR1 |= SPI_CR1_CSTART;
+
+    uint32_t start = time_ms();
+    bool got_a = false;
+    bool got_b = false;
+    spi_status_t result = SPI_STATUS_OK;
+
+    while (!got_a || !got_b ||
+           !(m->SR & SPI_SR_EOT) ||
+           !(s->SR & SPI_SR_EOT)) {
+
+        uint32_t msr = m->SR;
+        uint32_t ssr = s->SR;
+
+        if ((msr | ssr) & SPI_SR_OVR) {
+            result = SPI_STATUS_OVERRUN;
+            break;
+        }
+
+        if ((msr | ssr) & SPI_SR_MODF) {
+            result = SPI_STATUS_MODE_FAULT;
+            break;
+        }
+
+        if (!got_a && (msr & SPI_SR_RXP)) {
+            *master_rx = (uint16_t)spi_read_frame(m, 16U);
+            got_a = true;
+        }
+
+        if (!got_b && (ssr & SPI_SR_RXP)) {
+            *slave_rx = (uint16_t)spi_read_frame(s, 16U);
+            got_b = true;
+        }
+
+        if (time_elapsed_ms(start) >= timeout_ms) {
+            result = SPI_STATUS_TIMEOUT;
+            break;
+        }
+    }
+
+    // Do not release CS until the master finishes,
+    // except when aborting a failed transaction.
+    if (result == SPI_STATUS_OK) {
+        gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, true);
+    } else {
+        m->CR1 |= SPI_CR1_CSUSP;
+
+        uint32_t abort_start = time_ms();
+        while ((m->SR & SPI_SR_SUSP) == 0U &&
+               (m->SR & SPI_SR_EOT) == 0U &&
+               time_elapsed_ms(abort_start) < timeout_ms) {
+        }
+
+        gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, true);
+    }
+
+    m->CR1 &= ~SPI_CR1_SPE;
+    s->CR1 &= ~SPI_CR1_SPE;
+
+    m->IFCR = clear;
+    s->IFCR = clear;
+
+    return result;
 }
 

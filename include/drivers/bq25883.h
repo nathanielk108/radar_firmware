@@ -104,7 +104,9 @@ bq25883_status_t bq25883_set_charge_voltage_mv(const bq25883_t *dev, uint16_t mv
 bq25883_status_t bq25883_set_charge_current_ma(const bq25883_t *dev, uint16_t ma);
 bq25883_status_t bq25883_set_input_current_limit_ma(const bq25883_t *dev, uint16_t ma);
 bq25883_status_t bq25883_set_precharge_termination_ma(const bq25883_t *dev, uint16_t precharge_ma, uint16_t termination_ma);
-bq25883_status_t bq25883_adc_convert(const bq25883_t *dev, uint32_t timeout_ms);
+bq25883_status_t bq25883_adc_convert(const bq25883_t *dev /*, uint32_t timeout_ms*/);
 bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev, bq25883_snapshot_t *s);
 bq25883_status_t bq25883_prepare_for_bringup(const bq25883_t *dev);
+bool bq25883_power_good(void);
+void bq25883_print_snapshot(const bq25883_t *battery);
 

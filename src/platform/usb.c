@@ -77,12 +77,20 @@ bool usb_init(void) {
     return false;
   }
 
-
   return true;
 }
 
 void OTG_FS_IRQHandler(void) {
   tusb_int_handler(0, true);
+}
+
+void usb_console_putchar(const char c) { 
+  tud_cdc_write(&c, 1U);
+  tud_cdc_write_flush();
+}
+
+void usb_task(void) {
+  tud_task();
 }
 
 void usb_console_write(const char *str) {

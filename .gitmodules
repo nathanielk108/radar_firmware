@@ -10,3 +10,6 @@
 [submodule "vendor/tinyusb"]
 	path = vendor/tinyusb
 	url = https://github.com/hathach/tinyusb
+[submodule "vendor/printf"]
+	path = vendor/printf
+	url = https://github.com/mpaland/printf.git

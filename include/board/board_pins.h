@@ -76,6 +76,33 @@
 #define FREQ_DATA_PORT GPIOF
 #define FREQ_DATA_PIN 0U
 
+#define ADC_A_CS_PORT GPIOF
+#define ADC_A_CS_PIN 6U
+
+#define ADC_A_SCK_PORT GPIOF
+#define ADC_A_SCK_PIN 7U
+#define ADC_A_SCK_AF 5U
+
+#define ADC_A_MISO_PORT GPIOF
+#define ADC_A_MISO_PIN 8U
+#define ADC_A_MISO_AF 5U
+
+#define ADC_A_MOSI_PORT GPIOF
+#define ADC_A_MOSI_PIN 9U
+#define ADC_A_MOSI_AF 5U
+
+#define ADC_B_CS_PORT GPIOE
+#define ADC_B_CS_PIN 4U
+#define ADC_B_CS_AF 5U
+
+#define ADC_B_SCK_PORT GPIOE
+#define ADC_B_SCK_PIN 2U
+#define ADC_B_SCK_AF 5U
+
+#define ADC_B_MOSI_PORT GPIOE
+#define ADC_B_MOSI_PIN 6U
+#define ADC_B_MOSI_AF 5U
+
 // I2C
 
 #define BATT_SCL_PORT GPIOF

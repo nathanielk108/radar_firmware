@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+
 typedef enum {
     SPI_STATUS_OK = 0,
     SPI_STATUS_INVALID_ARGUMENT,
@@ -63,6 +64,16 @@ typedef struct {
     bool software_nss;
 } spi_config_t;
 
-spi_status_t spi_init(spi_config_t *config);
+
+spi_status_t spi_init(const spi_config_t *config);
 
 spi_status_t spi_transfer(const spi_config_t *config, const void *tx, void *rx, uint16_t frame_count, uint32_t timeout_ms);
+
+spi_status_t spi_transfer_pair(
+    const spi_config_t *master,
+    const spi_config_t *slave,
+    uint16_t tx,
+    uint16_t *master_rx,
+    uint16_t *slave_rx,
+    uint32_t timeout_ms
+);

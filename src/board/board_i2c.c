@@ -7,8 +7,7 @@ const i2c_config_t batt_i2c_config = {
   .timing = I2C_TIMING_100KHZ
 };
 
-void board_i2c_init(void) {
-
+void board_i2c_batt_init(void) {
   gpio_config_t batt_scl = {
     .port        = BATT_SCL_PORT,
     .pin         = BATT_SCL_PIN,
@@ -31,5 +30,9 @@ void board_i2c_init(void) {
 
   gpio_init(&batt_scl);
   gpio_init(&batt_sda);
+}
+
+void board_i2c_init(void) {
+  board_i2c_batt_init();
 }
 

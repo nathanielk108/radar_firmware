@@ -54,3 +54,4 @@ void debug_swo_hex32(uint32_t value) {
     debug_swo_putc(hex[(value >> shift) & 0xFU]);
   }
 }
+

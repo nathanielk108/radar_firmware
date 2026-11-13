@@ -87,9 +87,3 @@ void board_rf_15v_enable(bool enable) {
 bool board_efuse_power_good(void) {
   return gpio_read(EFUSE_PG_PORT, EFUSE_PG_PIN);
 }
-
-bool board_battery_power_good(void) {
-  // BQ25883 has active low power good output
-  return !gpio_read(BATT_PG_PORT, BATT_PG_PIN);
-}
-

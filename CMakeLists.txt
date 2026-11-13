@@ -98,12 +98,16 @@ set(FIRMWARE_SOURCES
   src/board/board_power.c
   src/board/board_spi.c
   src/board/board_i2c.c
+  src/board/board_freq.c
+  src/system/io.c
   src/usb/usb_descriptors.c
   src/drivers/bq25883.c
   src/drivers/adf4158.c
+  src/drivers/ad4683.c
 )
 
-set(TINYUSB_SOURCES
+set(VENDOR_SOURCES
+  vendor/printf/printf.c
   ${TINYUSB}/src/tusb.c
   ${TINYUSB}/src/common/tusb_fifo.c
   ${TINYUSB}/src/device/usbd.c
@@ -114,7 +118,7 @@ set(TINYUSB_SOURCES
 
 add_executable(radar_firmware
   ${FIRMWARE_SOURCES}
-  ${TINYUSB_SOURCES}
+  ${VENDOR_SOURCES}
   ${CMSIS_DEVICE}/Source/Templates/system_stm32h7xx.c
   ${CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32h743xx.s
 )
@@ -126,6 +130,7 @@ set_target_properties(radar_firmware
 target_include_directories(radar_firmware PRIVATE
   ${PROJECT_ROOT}/include
   ${TINYUSB}/src
+  vendor/printf
   ${CMSIS_CORE}/Include
   ${CMSIS_DEVICE}/Include
 )
@@ -141,6 +146,27 @@ target_compile_options(radar_firmware PRIVATE
   -Wshadow
   -Wdouble-promotion
 )
+
+set(PRINTF_OUT "USB" 
+    CACHE STRING "printf output backend: NONE, SWO, USB, BOTH"
+)
+if (PRINTF_OUT STREQUAL "NONE")
+  target_compile_definitions(radar_firmware PRIVATE
+    PRINTF_OUT=0
+  )
+elseif(PRINTF_OUT STREQUAL "SWO")
+  target_compile_definitions(radar_firmware PRIVATE
+    PRINTF_OUT=1
+  )
+elseif(PRINTF_OUT STREQUAL "USB")
+  target_compile_definitions(radar_firmware PRIVATE
+    PRINTF_OUT=2
+  )
+elseif(PRINTF_OUT STREQUAL "BOTH")
+  target_compile_definitions(radar_firmware PRIVATE
+    PRINTF_OUT=3
+  )
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_options(radar_firmware PRIVATE

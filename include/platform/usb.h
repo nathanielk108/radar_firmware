@@ -8,5 +8,7 @@
 bool usb_init(void);
 
 void usb_console_write(const char *str);
+void usb_console_putchar(const char c);
 uint32_t usb_console_read(char *buffer, uint32_t len);
 bool usb_console_connected();
+void usb_task(void);
