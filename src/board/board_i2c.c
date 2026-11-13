@@ -1,6 +1,6 @@
 #include "board/board_i2c.h"
 #include "board/board_pins.h"
-#include "platform/gpio.h"
+#include "board/board_gpio.h"
 
 const i2c_config_t batt_i2c_config = {
   .i2c = I2C4,
@@ -8,28 +8,9 @@ const i2c_config_t batt_i2c_config = {
 };
 
 void board_i2c_batt_init(void) {
-  gpio_config_t batt_scl = {
-    .port        = BATT_SCL_PORT,
-    .pin         = BATT_SCL_PIN,
-    .mode        = GPIO_MODE_ALTERNATE,
-    .output_type = GPIO_OPEN_DRAIN,
-    .pull        = GPIO_PULL_NONE,
-    .speed       = GPIO_SPEED_HIGH,
-    .alternate   = BATT_SCL_AF,
-  };
+  board_gpio_pin(BATT_SCL_PORT, BATT_SCL_PIN, LL_GPIO_MODE_ALTERNATE, LL_GPIO_OUTPUT_OPENDRAIN, LL_GPIO_PULL_NO, LL_GPIO_SPEED_FREQ_HIGH, BATT_SCL_AF, false);
 
-  gpio_config_t batt_sda = {
-    .port        = BATT_SDA_PORT,
-    .pin         = BATT_SDA_PIN,
-    .mode        = GPIO_MODE_ALTERNATE,
-    .output_type = GPIO_OPEN_DRAIN,
-    .pull        = GPIO_PULL_NONE,
-    .speed       = GPIO_SPEED_HIGH,
-    .alternate   = BATT_SDA_AF,
-  };
-
-  gpio_init(&batt_scl);
-  gpio_init(&batt_sda);
+  board_gpio_pin(BATT_SDA_PORT, BATT_SDA_PIN, LL_GPIO_MODE_ALTERNATE, LL_GPIO_OUTPUT_OPENDRAIN, LL_GPIO_PULL_NO, LL_GPIO_SPEED_FREQ_HIGH, BATT_SDA_AF, false);
 }
 
 void board_i2c_init(void) {

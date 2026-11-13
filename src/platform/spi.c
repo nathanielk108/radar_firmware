@@ -1,62 +1,18 @@
 #include "platform/spi.h"
 #include "platform/time.h"
-#include "platform/gpio.h"
-#include "board/board_pins.h"
+#include "stm32h7xx_ll_gpio.h"
+#include "stm32h7xx_ll_spi.h"
+#include "stm32h7xx_ll_bus.h"
 
 static bool spi_enable_clock(SPI_TypeDef *spi) {
-  if (spi == SPI1) {
-    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
-    (void)RCC->APB2ENR;
+    if      (spi == SPI1) LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SPI1);
+    else if (spi == SPI2) LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_SPI2);
+    else if (spi == SPI3) LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_SPI3);
+    else if (spi == SPI4) LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SPI4);
+    else if (spi == SPI5) LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SPI5);
+    else if (spi == SPI6) LL_APB4_GRP1_EnableClock(LL_APB4_GRP1_PERIPH_SPI6);
+    else return false;
     return true;
-  }
-  else if (spi == SPI2) {
-    RCC->APB1LENR |= RCC_APB1LENR_SPI2EN;
-    (void)RCC->APB1LENR;
-    return true;
-  }
-  else if (spi == SPI3) {
-    RCC->APB1LENR |= RCC_APB1LENR_SPI3EN;
-    (void)RCC->APB1LENR;
-    return true;
-  }
-  else if (spi == SPI4) {
-    RCC->APB2ENR |= RCC_APB2ENR_SPI4EN;
-    (void)RCC->APB2ENR;
-    return true;
-  }
-  else if (spi == SPI5) {
-    RCC->APB2ENR |= RCC_APB2ENR_SPI5EN;
-    (void)RCC->APB2ENR;
-    return true;
-  }
-  else if (spi == SPI6) {
-    RCC->APB4ENR |= RCC_APB4ENR_SPI6EN;
-    (void)RCC->APB4ENR;
-    return true;
-  }
-
-  return false;
-}
-
-__attribute__((__unused__))
-static spi_status_t spi_wait_flag(SPI_TypeDef *spi, uint32_t flag, uint32_t start, uint32_t timeout_ms) {
-  while ((spi->SR & flag) == 0U) {
-    if ((spi->SR & SPI_SR_OVR) != 0U) {
-      spi->IFCR = SPI_IFCR_OVRC;
-      return SPI_STATUS_OVERRUN;
-    }
-
-    if ((spi->SR & SPI_SR_MODF) != 0U) {
-      spi->IFCR = SPI_IFCR_MODFC;
-      return SPI_STATUS_MODE_FAULT;
-    }
-
-    if (time_elapsed_ms(start) >= timeout_ms) {
-      return SPI_STATUS_TIMEOUT;
-    }
-  }
-
-  return SPI_STATUS_OK;
 }
 
 static void spi_write_frame(SPI_TypeDef *spi, uint32_t value, uint8_t data_size) {
@@ -116,80 +72,39 @@ static void store_rx_frame(void *buffer, uint16_t index, uint8_t data_size, uint
 }
 
 spi_status_t spi_init(const spi_config_t *config) {
-  if ((config == NULL) || (config->spi == NULL) || (config->data_size < 4U) || (config->data_size > 32U)) {
-    return SPI_STATUS_INVALID_ARGUMENT;
-  }
+    if (!config || !config->spi ||
+        config->data_size < 4U || config->data_size > 32U ||
+        config->mode > SPI_MODE_3 || config->baud_divider > SPI_DIV_256 ||
+        config->communication > SPI_COMM_HALF_DUPLEX ||
+        !spi_enable_clock(config->spi)) {
+        return SPI_STATUS_INVALID_ARGUMENT;
+    }
 
-  if (!spi_enable_clock(config->spi)) {
-    return SPI_STATUS_INVALID_ARGUMENT;
-  }
+    SPI_TypeDef *spi = config->spi;
+    LL_SPI_Disable(spi);
+    spi->CR1 = 0U;
+    spi->CR2 = 0U;
+    spi->CFG1 = 0U;
+    spi->CFG2 = 0U;
 
-  SPI_TypeDef *spi = config->spi;
+    LL_SPI_SetDataWidth(spi, (uint32_t)(config->data_size - 1U));
+    LL_SPI_SetBaudRatePrescaler(spi,
+        (uint32_t)config->baud_divider << SPI_CFG1_MBR_Pos);
+    LL_SPI_SetMode(spi, config->role == SPI_ROLE_MASTER ?
+                   LL_SPI_MODE_MASTER : LL_SPI_MODE_SLAVE);
+    LL_SPI_SetTransferDirection(spi, (uint32_t)config->communication << SPI_CFG2_COMM_Pos);
+    LL_SPI_SetClockPolarity(spi, (config->mode == SPI_MODE_2 || config->mode == SPI_MODE_3) ?
+                            LL_SPI_POLARITY_HIGH : LL_SPI_POLARITY_LOW);
+    LL_SPI_SetClockPhase(spi, (config->mode == SPI_MODE_1 || config->mode == SPI_MODE_3) ?
+                         LL_SPI_PHASE_2EDGE : LL_SPI_PHASE_1EDGE);
+    LL_SPI_SetTransferBitOrder(spi, config->bit_order == SPI_LSB_FIRST ?
+                                LL_SPI_LSB_FIRST : LL_SPI_MSB_FIRST);
+    LL_SPI_SetNSSMode(spi, config->software_nss ? LL_SPI_NSS_SOFT : LL_SPI_NSS_HARD_INPUT);
+    if (config->software_nss) SET_BIT(spi->CR1, SPI_CR1_SSI);
 
-  /* Peripheral must be disabled while configuring it. */
-  spi->CR1 &= ~SPI_CR1_SPE;
-
-  /*
-   * Start from a defined state.
-   * We are not using CRC or DMA yet.
-   */
-  spi->CR1 = 0U;
-  spi->CR2 = 0U;
-  spi->CFG1 = 0U;
-  spi->CFG2 = 0U;
-
-  /*
-   * CFG1:
-   * DSIZE is encoded as number_of_bits - 1.
-   * FTHLV = 0 gives a one-frame FIFO threshold, convenient
-   * for simple polling.
-   */
-  spi->CFG1 = ((uint32_t)config->baud_divider << SPI_CFG1_MBR_Pos) |
-              ((uint32_t)(config->data_size - 1U) << SPI_CFG1_DSIZE_Pos);
-
-  /*
-   * Software NSS: set SSI before enabling software NSS/master.
-   */
-  if (config->software_nss) {
-    spi->CR1 |= SPI_CR1_SSI;
-    spi->CFG2 |= SPI_CFG2_SSM;
-  }
-
-  if (config->role == SPI_ROLE_MASTER) {
-    spi->CFG2 |= SPI_CFG2_MASTER;
-  }
-
-  spi->CFG2 |= ((uint32_t)config->communication << SPI_CFG2_COMM_Pos);
-
-  if (config->bit_order == SPI_LSB_FIRST) {
-    spi->CFG2 |= SPI_CFG2_LSBFRST;
-  }
-
-  switch (config->mode) {
-  case SPI_MODE_0:
-    break;
-
-  case SPI_MODE_1:
-    spi->CFG2 |= SPI_CFG2_CPHA;
-    break;
-
-  case SPI_MODE_2:
-    spi->CFG2 |= SPI_CFG2_CPOL;
-    break;
-
-  case SPI_MODE_3:
-    spi->CFG2 |= SPI_CFG2_CPOL | SPI_CFG2_CPHA;
-    break;
-  }
-
-  /*
-   * Clear stale status flags.
-   */
-  spi->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC | SPI_IFCR_OVRC | SPI_IFCR_MODFC;
-
-  spi->CR1 |= SPI_CR1_SPE;
-
-  return SPI_STATUS_OK;
+    spi->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC | SPI_IFCR_OVRC | SPI_IFCR_MODFC;
+    LL_SPI_Enable(spi);
+    return SPI_STATUS_OK;
 }
 
 spi_status_t spi_transfer(
@@ -230,15 +145,16 @@ spi_status_t spi_transfer(
     /*
      * Program number of frames for this transaction.
      */
-    spi->CR2 =
-        (spi->CR2 & ~SPI_CR2_TSIZE_Msk) |
-        ((uint32_t)frame_count << SPI_CR2_TSIZE_Pos);
+    LL_SPI_SetTransferSize(spi, frame_count);
+
+    spi_write_frame(spi, get_tx_frame(tx, 0, config->data_size), config->data_size);
+    tx_count = 0;
 
     /*
      * Start master transaction.
      */
     if (config->role == SPI_ROLE_MASTER) {
-        spi->CR1 |= SPI_CR1_CSTART;
+        LL_SPI_StartMasterTransfer(spi);
     }
 
     while (rx_count < frame_count) {
@@ -250,13 +166,13 @@ spi_status_t spi_transfer(
          */
         if ((status & SPI_SR_OVR) != 0U) {
             spi->IFCR = SPI_IFCR_OVRC;
-            spi->CR1 &= ~SPI_CR1_SPE;
+            LL_SPI_Disable(spi);
             return SPI_STATUS_OVERRUN;
         }
 
         if ((status & SPI_SR_MODF) != 0U) {
             spi->IFCR = SPI_IFCR_MODFC;
-            spi->CR1 &= ~SPI_CR1_SPE;
+            LL_SPI_Disable(spi);
             return SPI_STATUS_MODE_FAULT;
         }
 
@@ -292,7 +208,7 @@ spi_status_t spi_transfer(
         }
 
         if (time_elapsed_ms(start) >= timeout_ms) {
-            spi->CR1 &= ~SPI_CR1_SPE;
+            // LL_SPI_Disable(spi);
             return SPI_STATUS_TIMEOUT;
         }
     }
@@ -302,7 +218,7 @@ spi_status_t spi_transfer(
      */
     while ((spi->SR & SPI_SR_EOT) == 0U) {
         if (time_elapsed_ms(start) >= timeout_ms) {
-            spi->CR1 &= ~SPI_CR1_SPE;
+            // LL_SPI_Disable(spi);
             return SPI_STATUS_TIMEOUT;
         }
     }
@@ -319,9 +235,11 @@ spi_status_t spi_transfer_pair(
     uint16_t tx,
     uint16_t *master_rx,
     uint16_t *slave_rx,
+    GPIO_TypeDef *cs_port,
+    uint8_t cs_pin,
     uint32_t timeout_ms)
 {
-    if (!master || !slave || !master_rx || !slave_rx ||
+    if (!master || !slave || !master_rx || !slave_rx || !cs_port || cs_pin > 15U ||
         !timeout_ms || master->spi == slave->spi ||
         master->role != SPI_ROLE_MASTER ||
         slave->role != SPI_ROLE_SLAVE ||
@@ -339,11 +257,11 @@ spi_status_t spi_transfer_pair(
     SPI_TypeDef *s = slave->spi;
 
     // Start a fresh transaction on both peripherals.
-    m->CR1 &= ~SPI_CR1_SPE;
-    s->CR1 &= ~SPI_CR1_SPE;
+    LL_SPI_Disable(m);
+    LL_SPI_Disable(s);
 
-    m->CR2 = (m->CR2 & ~SPI_CR2_TSIZE_Msk) | 1U;
-    s->CR2 = (s->CR2 & ~SPI_CR2_TSIZE_Msk) | 1U;
+    LL_SPI_SetTransferSize(m, 1U);
+    LL_SPI_SetTransferSize(s, 1U);
 
     uint32_t clear =
         SPI_IFCR_EOTC | SPI_IFCR_TXTFC |
@@ -353,25 +271,24 @@ spi_status_t spi_transfer_pair(
     s->IFCR = clear;
 
     // Arm the slave before starting the master.
-    s->CR1 |= SPI_CR1_SPE;
-    m->CR1 |= SPI_CR1_SPE;
+    LL_SPI_Enable(s);
+    LL_SPI_Enable(m);
 
     // Preload the master's transmit FIFO.
     spi_write_frame(m, tx, 16U);
 
     // ADC CS also drives the SPI4 NSS input.
-    gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, false);
+    LL_GPIO_ResetOutputPin(cs_port, 1UL << cs_pin);
 
-    m->CR1 |= SPI_CR1_CSTART;
+    LL_SPI_StartMasterTransfer(m);
 
     uint32_t start = time_ms();
     bool got_a = false;
     bool got_b = false;
     spi_status_t result = SPI_STATUS_OK;
 
-    while (!got_a || !got_b ||
-           !(m->SR & SPI_SR_EOT) ||
-           !(s->SR & SPI_SR_EOT)) {
+    /* Hardware-NSS slave does not always assert EOT for a single frame. */
+    while (!got_a || !got_b || !(m->SR & SPI_SR_EOT)) {
 
         uint32_t msr = m->SR;
         uint32_t ssr = s->SR;
@@ -405,9 +322,9 @@ spi_status_t spi_transfer_pair(
     // Do not release CS until the master finishes,
     // except when aborting a failed transaction.
     if (result == SPI_STATUS_OK) {
-        gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, true);
+        LL_GPIO_SetOutputPin(cs_port, 1UL << cs_pin);
     } else {
-        m->CR1 |= SPI_CR1_CSUSP;
+        LL_SPI_SuspendMasterTransfer(m);
 
         uint32_t abort_start = time_ms();
         while ((m->SR & SPI_SR_SUSP) == 0U &&
@@ -415,11 +332,11 @@ spi_status_t spi_transfer_pair(
                time_elapsed_ms(abort_start) < timeout_ms) {
         }
 
-        gpio_write(ADC_A_CS_PORT, ADC_A_CS_PIN, true);
+        LL_GPIO_SetOutputPin(cs_port, 1UL << cs_pin);
     }
 
-    m->CR1 &= ~SPI_CR1_SPE;
-    s->CR1 &= ~SPI_CR1_SPE;
+    LL_SPI_Disable(m);
+    LL_SPI_Disable(s);
 
     m->IFCR = clear;
     s->IFCR = clear;

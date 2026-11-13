@@ -1,6 +1,7 @@
 #include "platform/debug_swo.h"
 #include "stm32h7xx.h"
 
+
 #define ITM_UNLOCK (0xC5ACCE55U)
 
 void debug_swo_init(void) {
@@ -12,26 +13,12 @@ void debug_swo_init(void) {
 }
 
 bool debug_swo_putc(char c) {
-  // if ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) == 0U) {
-  //   return false;
-  // }
-  //
-  // if ((ITM->TCR & ITM_TCR_ITMENA_Msk) == 0U) {
-  //   return false;
-  // }
-  //
-  // if ((ITM->TER & 1U) == 0U) {
-  //   return false;
-  // }
-  //
-  // // Read indicates whether FIFO can accept data
-  // if (ITM->PORT[0U].u32 == 0U) {
-  //   return false;
-  // }
-  //
-  // ITM->PORT[0U].u8 = (uint8_t)c;
-  (void)ITM_SendChar((uint32_t)c);
-
+  /* Never stall acquisition if a debugger is absent or the ITM FIFO is full. */
+  if ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) == 0U ||
+      (ITM->TCR & ITM_TCR_ITMENA_Msk) == 0U ||
+      (ITM->TER & 1U) == 0U ||
+      ITM->PORT[0].u32 == 0U) return false;
+  ITM->PORT[0].u8 = (uint8_t)c;
   return true;
 }
 

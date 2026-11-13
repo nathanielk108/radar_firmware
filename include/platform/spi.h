@@ -75,5 +75,7 @@ spi_status_t spi_transfer_pair(
     uint16_t tx,
     uint16_t *master_rx,
     uint16_t *slave_rx,
+    GPIO_TypeDef *cs_port,
+    uint8_t cs_pin,
     uint32_t timeout_ms
 );

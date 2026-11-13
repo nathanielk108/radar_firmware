@@ -46,8 +46,6 @@ typedef struct {
     uint16_t clk2;
 } adf4158_ramp_result_t;
 
-extern const adf4158_ramp_config_t ramp;
-extern const adf4158_fixed_config_t fixed;
 
 void adf4158_write(uint32_t value);
 

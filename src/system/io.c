@@ -1,6 +1,7 @@
 #include "platform/usb.h"
 #include "platform/debug_swo.h"
 
+/* Select a single backend during timing-critical bring-up. */
 #define NONE 0U
 #define SWO 1U
 #define USB 2U

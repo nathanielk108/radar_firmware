@@ -1,6 +1,5 @@
-#include "board/board_pins.h"
 #include "platform/usb.h"
-#include "platform/gpio.h"
+#include "board/board_usb.h"
 
 #include "tusb.h"
 
@@ -29,38 +28,7 @@ bool usb_init(void) {
 
   RCC->D2CCIP2R = (RCC->D2CCIP2R & ~RCC_D2CCIP2R_USBSEL_Msk) | RCC_D2CCIP2R_USBSEL_0;
 
-  gpio_config_t usb_dp = {
-    .port = USB_DP_PORT,
-    .pin = USB_DP_PIN,
-    .mode = GPIO_MODE_ALTERNATE,
-    .output_type = GPIO_PUSH_PULL,
-    .pull = GPIO_PULL_NONE,
-    .speed = GPIO_SPEED_HIGH,
-    .alternate = 10U,
-  };
-
-  gpio_config_t usb_dn = {
-    .port = USB_DN_PORT,
-    .pin = USB_DN_PIN,
-    .mode = GPIO_MODE_ALTERNATE,
-    .output_type = GPIO_PUSH_PULL,
-    .pull = GPIO_PULL_NONE,
-    .speed = GPIO_SPEED_HIGH,
-    .alternate = 10U,
-  };
-
-  gpio_config_t usb_vbus = {
-    .port = USB_VBUS_PORT,
-    .pin = USB_VBUS_PIN,
-    .mode = GPIO_MODE_INPUT,
-    .output_type = GPIO_PUSH_PULL,
-    .pull = GPIO_PULL_NONE,
-    .speed = GPIO_SPEED_LOW,
-  };
-
-  gpio_init(&usb_dp);
-  gpio_init(&usb_dn);
-  gpio_init(&usb_vbus);
+  board_usb_init();
 
   RCC->AHB1ENR |= RCC_AHB1ENR_USB2OTGFSEN;
   (void)RCC->AHB1ENR;
@@ -84,13 +52,15 @@ void OTG_FS_IRQHandler(void) {
   tusb_int_handler(0, true);
 }
 
-void usb_console_putchar(const char c) { 
-  tud_cdc_write(&c, 1U);
-  tud_cdc_write_flush();
+void usb_console_putchar(const char c) {
+  if (tud_cdc_connected() && tud_cdc_write_available() != 0U) {
+    (void)tud_cdc_write(&c, 1U);
+  }
 }
 
 void usb_task(void) {
   tud_task();
+  if (tud_cdc_connected()) tud_cdc_write_flush();
 }
 
 void usb_console_write(const char *str) {

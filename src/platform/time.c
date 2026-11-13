@@ -35,3 +35,8 @@ uint32_t time_elapsed_ms(uint32_t start) {
 bool time_expired(uint32_t start, uint32_t duration) {
   return time_elapsed_ms(start) >= duration;
 }
+
+void time_delay_ms(uint32_t duration) {
+  const uint32_t start = time_ms();
+  while (!time_expired(start, duration)) { __NOP(); }
+}

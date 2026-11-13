@@ -1,15 +1,15 @@
 #include "platform/i2c.h"
 #include "platform/time.h"
+#include "stm32h7xx_ll_i2c.h"
+#include "stm32h7xx_ll_bus.h"
 
 static bool i2c_enable_clock(I2C_TypeDef *i2c)
 {
-    if (i2c == I2C1) RCC->APB1LENR |= RCC_APB1LENR_I2C1EN;
-    else if (i2c == I2C2) RCC->APB1LENR |= RCC_APB1LENR_I2C2EN;
-    else if (i2c == I2C3) RCC->APB1LENR |= RCC_APB1LENR_I2C3EN;
-    else if (i2c == I2C4) RCC->APB4ENR |= RCC_APB4ENR_I2C4EN;
+    if      (i2c == I2C1) LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C1);
+    else if (i2c == I2C2) LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C2);
+    else if (i2c == I2C3) LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_I2C3);
+    else if (i2c == I2C4) LL_APB4_GRP1_EnableClock(LL_APB4_GRP1_PERIPH_I2C4);
     else return false;
-    (void)RCC->APB1LENR;
-    (void)RCC->APB4ENR;
     return true;
 }
 
@@ -39,10 +39,10 @@ static void i2c_abort(I2C_TypeDef *i2c)
         while (((i2c->ISR & I2C_ISR_STOPF) == 0U) &&
                (time_elapsed_ms(start) < 2U)) {}
     }
-    i2c->CR1 &= ~I2C_CR1_PE;
+    LL_I2C_Disable(i2c);
     i2c_clear_flags(i2c);
     i2c->CR2 = 0U;
-    i2c->CR1 |= I2C_CR1_PE;
+    LL_I2C_Enable(i2c);
 }
 
 static i2c_status_t i2c_wait(I2C_TypeDef *i2c, uint32_t flag,
@@ -77,12 +77,12 @@ i2c_status_t i2c_init(const i2c_config_t *config)
         !i2c_enable_clock(config->i2c)) return I2C_STATUS_INVALID_ARGUMENT;
 
     I2C_TypeDef *i2c = config->i2c;
-    i2c->CR1 &= ~I2C_CR1_PE;
+    LL_I2C_Disable(i2c);
     i2c->CR1 = 0U;
     i2c->CR2 = 0U;
-    i2c->TIMINGR = config->timing;
+    LL_I2C_SetTiming(i2c, config->timing);
     i2c_clear_flags(i2c);
-    i2c->CR1 |= I2C_CR1_PE;
+    LL_I2C_Enable(i2c);
     return I2C_STATUS_OK;
 }
 

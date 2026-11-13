@@ -10,13 +10,9 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
-set(CMSIS_CORE
-  ${PROJECT_ROOT}/vendor/CMSIS_6/CMSIS/Core
-)
+set(CMSIS_CORE ${PROJECT_ROOT}/vendor/STM32CubeH7/Drivers/CMSIS)
 
-set(CMSIS_DEVICE
-  ${PROJECT_ROOT}/vendor/cmsis-device-h7
-)
+set(CMSIS_DEVICE ${CMSIS_CORE}/Device/ST/STM32H7xx)
 
 set(CMSIS_DSP
   ${PROJECT_ROOT}/vendor/CMSIS-DSP
@@ -25,6 +21,18 @@ set(CMSIS_DSP
 set(TINYUSB
   ${PROJECT_ROOT}/vendor/tinyusb
 )
+
+# STM32CubeH7 supplies one consistent CMSIS Device/Core + LL/HAL header set.
+# No CubeIDE, CubeMX-generated initialization or HAL source files required.
+set(STM32CUBE_H7
+  ${PROJECT_ROOT}/vendor/STM32CubeH7
+  CACHE PATH "STM32CubeH7 firmware tree"
+)
+set(STM32_HAL_DRIVER_INC ${STM32CUBE_H7}/Drivers/STM32H7xx_HAL_Driver/Inc)
+if(NOT EXISTS "${STM32_HAL_DRIVER_INC}/stm32h7xx_ll_gpio.h"
+   OR NOT EXISTS "${CMSIS_DEVICE}/Include/stm32h7xx.h")
+  message(FATAL_ERROR "STM32CubeH7 LL headers missing: ${STM32_HAL_DRIVER_INC}")
+endif()
 
 set(LINKER_SCRIPT
   ${PROJECT_ROOT}/linker/STM32H743ZITx_FLASH_RAM_D1.ld
@@ -63,7 +71,7 @@ target_compile_definitions(mcu_options INTERFACE
 
 # CMSIS-DSP
 
-set(CMSISCORE ${CMSIS_CORE})
+set(CMSISCORE ${CMSIS_CORE}/Core)
 
 set(DISABLEFLOAT16 ON CACHE BOOL "" FORCE)
 set(CMSISDSP_INSTALL OFF CACHE BOOL "" FORCE)
@@ -82,6 +90,9 @@ target_compile_options(CMSISDSP PRIVATE
   -ffast-math
 )
 
+# HAL SDMMC integration later: add only the HAL modules and
+# stm32h7xx_hal_conf.h when the SDMMC driver is implemented.
+
 # Firmware
 set(FIRMWARE_SOURCES
   src/main.c
@@ -90,7 +101,6 @@ set(FIRMWARE_SOURCES
   src/platform/debug_swo.c
   src/platform/fault.c
   src/platform/time.c
-  src/platform/gpio.c
   src/platform/mpu.c
   src/platform/usb.c
   src/platform/spi.c
@@ -99,15 +109,18 @@ set(FIRMWARE_SOURCES
   src/board/board_spi.c
   src/board/board_i2c.c
   src/board/board_freq.c
+  src/board/board_usb.c
   src/system/io.c
   src/usb/usb_descriptors.c
   src/drivers/bq25883.c
   src/drivers/adf4158.c
   src/drivers/ad4683.c
+  src/drivers/ism330is.c
+  src/drivers/bmi323.c
 )
 
 set(VENDOR_SOURCES
-  vendor/printf/printf.c
+  ${PROJECT_ROOT}/vendor/printf/printf.c
   ${TINYUSB}/src/tusb.c
   ${TINYUSB}/src/common/tusb_fifo.c
   ${TINYUSB}/src/device/usbd.c
@@ -130,9 +143,10 @@ set_target_properties(radar_firmware
 target_include_directories(radar_firmware PRIVATE
   ${PROJECT_ROOT}/include
   ${TINYUSB}/src
-  vendor/printf
-  ${CMSIS_CORE}/Include
+  ${PROJECT_ROOT}/vendor/printf
+  ${CMSIS_CORE}/Core/Include
   ${CMSIS_DEVICE}/Include
+  ${STM32_HAL_DRIVER_INC}
 )
 
 target_link_libraries(radar_firmware PRIVATE

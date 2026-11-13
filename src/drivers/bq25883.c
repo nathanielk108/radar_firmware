@@ -1,7 +1,5 @@
 #include "drivers/bq25883.h"
-#include "platform/gpio.h"
-#include "board/board_pins.h"
-#include "printf.h"
+#include "board/board_power.h"
 
 static bq25883_status_t bq25883_read_reg(
     const bq25883_t *dev,
@@ -115,14 +113,14 @@ bq25883_status_t bq25883_set_charge_enabled(
     const bq25883_t *dev, bool enable)
 {
     /* Never assert active-low CE until the register write is verified. */
-    gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
+    board_battery_charge_inhibit(true);
 
     bq25883_status_t status = bq25883_update_bits(
         dev, BQ25883_REG_CTRL2, 1U << 3,
         enable ? (1U << 3) : 0U);
     if (status != BQ25883_OK) return status;
 
-    if (enable) gpio_write(BATT_CE_PORT, BATT_CE_PIN, false);
+    if (enable) board_battery_charge_inhibit(false);
     return BQ25883_OK;
 }
 
@@ -413,7 +411,7 @@ bq25883_status_t bq25883_prepare_for_bringup(
     const bq25883_t *dev)
 {
     /* Hold the hardware inhibit before any I2C communication. */
-    gpio_write(BATT_CE_PORT, BATT_CE_PIN, true);
+    board_battery_charge_inhibit(true);
     bq25883_status_t status = bq25883_check_id(dev, NULL);
     if (status != BQ25883_OK) return status;
 
@@ -457,41 +455,5 @@ bq25883_status_t bq25883_prepare_for_bringup(
 }
 
 bool bq25883_power_good(void) {
-  // BQ25883 has active low power good output
-  return !gpio_read(BATT_PG_PORT, BATT_PG_PIN);
+    return board_battery_power_good();
 }
-
-void bq25883_print_snapshot(const bq25883_t *battery) {
-
-  bq25883_snapshot_t snapshot;
-  bq25883_status_t status = bq25883_get_snapshot(battery, &snapshot);
-
-  if (status != BQ25883_OK) {
-      printf("Snapshot failed: %0X\r\n", status);
-      uint8_t reg = 0x15;
-      uint8_t value = 0x0;
-      i2c_write_read(battery->i2c, BQ25883_I2C_ADDRESS, &reg, 1U, &value, 1U, 20U);
-      printf("REG_ADC_CTRL = %0X\r\n", value);
-      return;
-  }
-
-  printf("\r\n--- BQ25883 ---\r\n");
-
-  printf("VBUS (mV): %d\r\n", snapshot.vbus_mv);
-  printf("VBAT (mV): %d\r\n", snapshot.vbat_mv);
-  printf("VSYS (mV): %d\r\n", snapshot.vsys_mv);
-
-  printf("IBUS (mA): %d\r\n", snapshot.ibus_ma);
-  printf("ICHG (mA): %d\r\n", snapshot.ichg_ma);
-
-  printf("TDIE (C): %d\r\n", snapshot.tdie_half_c / 2);
-
-  printf("STATUS1: %0X\r\n", snapshot.status1);
-  printf("STATUS2: %0X\r\n", snapshot.status2);
-  printf("NTC: %0X\r\n", snapshot.ntc);
-  printf("FAULT: %0X\r\n", snapshot.fault);
-  printf("CHARGE STATE: %0X\r\n", snapshot.charge_state);
-
-  printf("\r\n----------------\r\n");
-}
-

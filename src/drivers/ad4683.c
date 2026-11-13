@@ -1,29 +1,13 @@
 #include "drivers/ad4683.h"
 #include "board/board_spi.h"
+#include "board/board_pins.h"
 
-spi_status_t ad4683_init(void)
+spi_status_t ad4683_transfer(uint16_t command, uint16_t *a, uint16_t *b)
 {
-    spi_status_t status;
-
-    status = spi_init(&adc_slave_spi_config);
-    if (status != SPI_STATUS_OK) {
-        return status;
-    }
-
-    return spi_init(&adc_master_spi_config);
-}
-
-spi_status_t ad4683_set_external_reference(void) {
-    uint16_t a, b;
-
+    if (!a || !b) return SPI_STATUS_INVALID_ARGUMENT;
     return spi_transfer_pair(
-        &adc_master_spi_config,
-        &adc_slave_spi_config,
-        0x9002U,
-        &a,
-        &b,
-        10U
-    );
+        &adc_master_spi_config, &adc_slave_spi_config,
+        command, a, b, ADC_A_CS_PORT, ADC_A_CS_PIN, 10U);
 }
 
 spi_status_t ad4683_read_sample(ad4683_sample_t *sample)
@@ -35,14 +19,7 @@ spi_status_t ad4683_read_sample(ad4683_sample_t *sample)
     uint16_t a = 0;
     uint16_t b = 0;
 
-    spi_status_t status = spi_transfer_pair(
-        &adc_master_spi_config,
-        &adc_slave_spi_config,
-        0x0000U,
-        &a,
-        &b,
-        10U
-    );
+    spi_status_t status = ad4683_transfer(0x0000U, &a, &b);
 
     if (status != SPI_STATUS_OK) {
         return status;
@@ -54,3 +31,12 @@ spi_status_t ad4683_read_sample(ad4683_sample_t *sample)
     return SPI_STATUS_OK;
 }
 
+
+spi_status_t ad4683_init(void)
+{
+    /* CONFIGURATION1 REFSEL: use external 3.3 V on REFIO.
+       Assumes reset-default configuration, as in the current bring-up.
+       The first conversion returned after this write is discarded. */
+    uint16_t a, b;
+    return ad4683_transfer(0x9002U, &a, &b);
+}

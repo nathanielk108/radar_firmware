@@ -1,39 +1,10 @@
 
 #include "drivers/adf4158.h"
 #include "board/board_pins.h"
-#include "platform/gpio.h"
+#include "stm32h7xx_ll_gpio.h"
 
 #define ADF4158_MODULUS (1ULL << 25)
 #define ADF4158_RAMP_EN (1UL << 31)
-
-const adf4158_ramp_config_t ramp = {
-  .pll = {
-      .reference_hz = 10000000U,
-      .frequency_hz = 5725000000ULL,
-      .r_counter = 1U,
-      .cp_current = 15U,
-      .reference_doubler = false,
-      .reference_div2 = false,
-      .prescaler_8_9 = true,
-      .positive_pd = true
-  },
-  .bandwidth_hz = 150000000U,
-  .chirp_us = 150U,
-  .delay_us = 0U,
-  .steps = 150U,
-  .mode = ADF4158_RAMP_SAWTOOTH
-};
-
-const adf4158_fixed_config_t fixed = {
-  .reference_hz = 10000000U,
-  .frequency_hz = 5800000000ULL,
-  .r_counter = 1U,
-  .cp_current = 15U,
-  .reference_doubler = false,
-  .reference_div2 = false,
-  .prescaler_8_9 = true,
-  .positive_pd = true,
-};
 
 static uint32_t saved_r0;
 static bool configured = false;
@@ -49,26 +20,26 @@ static void adf4158_delay(void)
 
 void adf4158_write(uint32_t value)
 {
-    gpio_write(FREQ_LE_PORT, FREQ_LE_PIN, false);
-    gpio_write(FREQ_CLK_PORT, FREQ_CLK_PIN, false);
+    LL_GPIO_ResetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
+    LL_GPIO_ResetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
     adf4158_delay();
 
     for (int bit = 31; bit >= 0; --bit) {
-        gpio_write(FREQ_DATA_PORT, FREQ_DATA_PIN,
-                   ((value >> bit) & 1U) != 0U);
+        if ((value >> bit) & 1U) LL_GPIO_SetOutputPin(FREQ_DATA_PORT, 1UL << FREQ_DATA_PIN);
+        else LL_GPIO_ResetOutputPin(FREQ_DATA_PORT, 1UL << FREQ_DATA_PIN);
         adf4158_delay();
 
-        gpio_write(FREQ_CLK_PORT, FREQ_CLK_PIN, true);
+        LL_GPIO_SetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
         adf4158_delay();
 
-        gpio_write(FREQ_CLK_PORT, FREQ_CLK_PIN, false);
+        LL_GPIO_ResetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
         adf4158_delay();
     }
 
     adf4158_delay();
-    gpio_write(FREQ_LE_PORT, FREQ_LE_PIN, true);
+    LL_GPIO_SetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
     adf4158_delay();
-    gpio_write(FREQ_LE_PORT, FREQ_LE_PIN, false);
+    LL_GPIO_ResetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
 }
 
 static uint64_t rounded_div(uint64_t a, uint64_t b)

@@ -2,12 +2,6 @@
 
 #include "platform/i2c.h"
 
-#define BQ25883_ADDR 0x6BU
-
-#pragma once
-
-#include "platform/i2c.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -108,5 +102,4 @@ bq25883_status_t bq25883_adc_convert(const bq25883_t *dev /*, uint32_t timeout_m
 bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev, bq25883_snapshot_t *s);
 bq25883_status_t bq25883_prepare_for_bringup(const bq25883_t *dev);
 bool bq25883_power_good(void);
-void bq25883_print_snapshot(const bq25883_t *battery);
 
