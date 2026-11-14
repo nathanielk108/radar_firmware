@@ -22,7 +22,6 @@ void board_dma_adc_init(uint16_t *tx, uint16_t *rx_a, uint16_t *rx_b) {
   LL_DMA_ConfigAddresses(DMA2, LL_DMA_STREAM_0, (uint32_t)tx,
                          (uint32_t) & (SPI5->TXDR),
                          LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
-  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_0, 1);
   LL_DMA_SetPeriphRequest(DMA2, LL_DMA_STREAM_0, LL_DMAMUX1_REQ_SPI5_TX);
 
   LL_DMA_ConfigTransfer(
@@ -33,7 +32,6 @@ void board_dma_adc_init(uint16_t *tx, uint16_t *rx_a, uint16_t *rx_b) {
           LL_DMA_MDATAALIGN_HALFWORD);
   LL_DMA_ConfigAddresses(DMA2, LL_DMA_STREAM_1, (uint32_t) & (SPI5->RXDR),
                          (uint32_t)rx_a, LL_DMA_DIRECTION_PERIPH_TO_MEMORY);
-  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_1, 1);
   LL_DMA_SetPeriphRequest(DMA2, LL_DMA_STREAM_1, LL_DMAMUX1_REQ_SPI5_RX);
 
   LL_DMA_ConfigTransfer(
@@ -44,7 +42,6 @@ void board_dma_adc_init(uint16_t *tx, uint16_t *rx_a, uint16_t *rx_b) {
           LL_DMA_MDATAALIGN_HALFWORD);
   LL_DMA_ConfigAddresses(DMA2, LL_DMA_STREAM_2, (uint32_t) & (SPI4->RXDR),
                          (uint32_t)rx_b, LL_DMA_DIRECTION_PERIPH_TO_MEMORY);
-  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_2, 1);
   LL_DMA_SetPeriphRequest(DMA2, LL_DMA_STREAM_2, LL_DMAMUX1_REQ_SPI4_RX);
 
   NVIC_SetPriority(DMA2_Stream0_IRQn, 4U);

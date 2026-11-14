@@ -22,9 +22,9 @@ DMA_BUFFER static uint16_t adc_b[1];
 #define ADC_DMA_ALL_DONE                                                       \
   (ADC_DMA_TX_DONE | ADC_DMA_RX_A_DONE | ADC_DMA_RX_B_DONE)
 
-volatile static uint8_t adc_dma_events;
+static volatile uint8_t adc_dma_events;
 
-static void clear_flags(void) {
+static void clear_dma_flags(void) {
   LL_DMA_ClearFlag_TC0(DMA2);
   LL_DMA_ClearFlag_TC1(DMA2);
   LL_DMA_ClearFlag_TC2(DMA2);
@@ -34,23 +34,44 @@ static void clear_flags(void) {
   adc_dma_events = 0U;
 }
 
-static void start(void) {
+static void clear_spi_flags(SPI_TypeDef *spi) {
+  spi->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC | SPI_IFCR_OVRC | SPI_IFCR_MODFC |
+              SPI_IFCR_SUSPC;
+}
+
+static void prepare(void) {
+
+  LL_DMA_DisableStream(DMA2, LL_DMA_STREAM_0);
+  LL_DMA_DisableStream(DMA2, LL_DMA_STREAM_1);
+  LL_DMA_DisableStream(DMA2, LL_DMA_STREAM_2);
+
+  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_0, 1);
+  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_1, 1);
+  LL_DMA_SetDataLength(DMA2, LL_DMA_STREAM_2, 1);
+  clear_dma_flags();
+
+  // Assert CS, Disable SPI, Configure transfer, Clear flags
+  LL_GPIO_SetOutputPin(ADC_A_CS_PORT, 1U << ADC_A_CS_PIN);
+  LL_SPI_Disable(SPI4);
+  LL_SPI_Disable(SPI5);
+  LL_SPI_SetTransferSize(SPI5, 1U);
+  LL_SPI_SetTransferSize(SPI4, 1U);
+  clear_spi_flags(SPI4);
+  clear_spi_flags(SPI5);
+
   LL_SPI_EnableDMAReq_TX(SPI5);
   LL_SPI_EnableDMAReq_RX(SPI5);
   LL_SPI_EnableDMAReq_RX(SPI4);
+}
 
-  LL_SPI_Disable(SPI4);
-  LL_SPI_Disable(SPI5);
-
-  LL_SPI_SetTransferSize(SPI5, 1U);
-  LL_SPI_SetTransferSize(SPI4, 1U);
-
+static void start(void) {
   LL_DMA_EnableStream(DMA2, LL_DMA_STREAM_1);
   LL_DMA_EnableStream(DMA2, LL_DMA_STREAM_2);
   LL_DMA_EnableStream(DMA2, LL_DMA_STREAM_0);
 
   LL_SPI_Enable(SPI4);
   LL_SPI_Enable(SPI5);
+
   LL_GPIO_ResetOutputPin(ADC_A_CS_PORT, 1U << ADC_A_CS_PIN);
   LL_SPI_StartMasterTransfer(SPI5);
 }
@@ -58,6 +79,7 @@ static void start(void) {
 static void stop(void) {
   LL_SPI_SuspendMasterTransfer(SPI5);
   LL_GPIO_SetOutputPin(ADC_A_CS_PORT, 1U << ADC_A_CS_PIN);
+
   LL_SPI_Disable(SPI5);
   LL_SPI_Disable(SPI4);
 
@@ -68,6 +90,25 @@ static void stop(void) {
   LL_SPI_DisableDMAReq_TX(SPI5);
   LL_SPI_DisableDMAReq_RX(SPI5);
   LL_SPI_DisableDMAReq_RX(SPI4);
+}
+
+const char *acquisition_status_name(acquisition_status_t status) {
+  switch (status) {
+  case ACQUISITION_OK:
+    return "OK";
+  case ACQUISITION_BUSY:
+    return "busy";
+  case ACQUISITION_INVALID_ARGUMENT:
+    return "invalid argument";
+  case ACQUISITION_SPI_ERROR:
+    return "SPI error";
+  case ACQUISITION_DMA_ERROR:
+    return "DMA error";
+  case ACQUISITION_TIMEOUT:
+    return "timeout";
+  default:
+    return "unknown";
+  }
 }
 
 acquisition_status_t acquisition_init(void) {
@@ -81,9 +122,25 @@ acquisition_status_t acquisition_init(void) {
   return ACQUISITION_OK;
 }
 
+static bool enabled(void) {
+  return (LL_SPI_IsEnabled(SPI4) || LL_SPI_IsEnabled(SPI5) ||
+          LL_DMA_IsEnabledStream(DMA2, LL_DMA_STREAM_0) ||
+          LL_DMA_IsEnabledStream(DMA2, LL_DMA_STREAM_1) ||
+          LL_DMA_IsEnabledStream(DMA2, LL_DMA_STREAM_2));
+}
+
 acquisition_status_t acquisition_capture_one(ad4683_sample_t *sample,
                                              uint32_t timeout_ms) {
-  clear_flags();
+
+  if (sample == NULL || timeout_ms == 0) {
+    return ACQUISITION_INVALID_ARGUMENT;
+  }
+
+  if (enabled()) {
+    return ACQUISITION_BUSY;
+  }
+
+  prepare();
   start();
 
   uint32_t start = time_ms();
@@ -95,7 +152,8 @@ acquisition_status_t acquisition_capture_one(ad4683_sample_t *sample,
       return ACQUISITION_DMA_ERROR;
     }
 
-    if (LL_SPI_IsActiveFlag_OVR(SPI5)) {
+    if (LL_SPI_IsActiveFlag_OVR(SPI5) || LL_SPI_IsActiveFlag_MODF(SPI5) ||
+        LL_SPI_IsActiveFlag_OVR(SPI4)) {
       // SPI error
       stop();
       return ACQUISITION_SPI_ERROR;

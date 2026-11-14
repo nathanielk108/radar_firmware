@@ -185,7 +185,7 @@ int main(void) {
       ad4683_sample_t sample = {0};
       acquisition_status_t status = acquisition_capture_one(&sample, 10);
       if (status != ACQUISITION_OK) {
-        LOG_ERROR("DMA Capture Failed");
+        LOG_ERROR("DMA Capture Failed: %s", acquisition_status_name(status));
       } else {
         LOG_INFO("DMA Capture: %d, %d", sample.a, sample.b);
       }
