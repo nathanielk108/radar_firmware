@@ -11,7 +11,7 @@
 #define RF_15V_EN_PIN 14U
 
 #define EFUSE_PG_PORT GPIOG
-#define EFUSE_PG_PIN  5U
+#define EFUSE_PG_PIN 5U
 
 #define BATT_PG_PORT GPIOG
 #define BATT_PG_PIN 1U
@@ -76,6 +76,10 @@
 #define FREQ_DATA_PORT GPIOF
 #define FREQ_DATA_PIN 0U
 
+#define ADC_A_SPI SPI5
+#define ADC_B_SPI SPI4
+#define ADC_DMA DMA2
+
 #define ADC_A_CS_PORT GPIOF
 #define ADC_A_CS_PIN 6U
 
@@ -105,6 +109,8 @@
 
 // I2C
 
+#define BATT_I2C I2C4
+
 #define BATT_SCL_PORT GPIOF
 #define BATT_SCL_PIN 14U
 #define BATT_SCL_AF 4U
@@ -113,4 +119,14 @@
 #define BATT_SDA_PIN 15U
 #define BATT_SDA_AF 4U
 
+// FMC Display
 
+#define DISPLAY_BL_PORT GPIOD
+#define DISPLAY_BL_PIN 12U
+#define DISPLAY_BL_AF 2U
+
+// Timer
+
+#define FREQ_TXDATA_PORT GPIOA
+#define FREQ_TXDATA_PIN 0U
+#define FREQ_TXDATA_AF 1U

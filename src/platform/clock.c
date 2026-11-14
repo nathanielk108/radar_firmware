@@ -4,24 +4,31 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CLOCK_TIMEOUT 2000000U
+/* clock_init runs before SysTick; use the already-enabled DWT CYCCNT.
+   SystemCoreClock describes the reset clock until SYSCLK is switched. */
+#define CLOCK_TIMEOUT_MS 100U
+
+static bool clock_timed_out(uint32_t start) {
+  uint32_t cycles = (SystemCoreClock / 1000U) * CLOCK_TIMEOUT_MS;
+  return (uint32_t)(DWT->CYCCNT - start) >= cycles;
+}
 
 static bool wait_set(volatile uint32_t *reg, uint32_t mask) {
-  for (uint32_t i = 0; i < CLOCK_TIMEOUT; ++i) {
-    if ((*reg & mask) == mask) {
-      return true;
-    }
+  uint32_t start = DWT->CYCCNT;
+  while ((*reg & mask) != mask) {
+    if (clock_timed_out(start))
+      return false;
   }
-  return false;
+  return true;
 }
 
 static bool wait_clear(volatile uint32_t *reg, uint32_t mask) {
-  for (uint32_t i = 0; i < CLOCK_TIMEOUT; ++i) {
-    if ((*reg & mask) == 0U) {
-      return true;
-    }
+  uint32_t start = DWT->CYCCNT;
+  while ((*reg & mask) != 0U) {
+    if (clock_timed_out(start))
+      return false;
   }
-  return false;
+  return true;
 }
 
 static bool configure_vos0(void) {
@@ -45,14 +52,11 @@ static bool configure_vos0(void) {
   return true;
 }
 
-static void configure_flash(void) {
-  MODIFY_REG(
-    FLASH->ACR,
-    FLASH_ACR_LATENCY_Msk | FLASH_ACR_WRHIGHFREQ_Msk,
-    FLASH_ACR_LATENCY_4WS | FLASH_ACR_WRHIGHFREQ_1
-  );
+static bool configure_flash(void) {
+  MODIFY_REG(FLASH->ACR, FLASH_ACR_LATENCY_Msk | FLASH_ACR_WRHIGHFREQ_Msk,
+             FLASH_ACR_LATENCY_4WS | FLASH_ACR_WRHIGHFREQ_1);
 
-  while ((FLASH->ACR & FLASH_ACR_LATENCY_Msk) != FLASH_ACR_LATENCY_4WS) { }
+  return wait_set(&FLASH->ACR, FLASH_ACR_LATENCY_4WS);
 }
 
 static bool enable_hse(void) {
@@ -68,22 +72,19 @@ static bool configure_pll1(void) {
     return false;
   }
 
-  MODIFY_REG(
-    RCC->PLLCKSELR,
-    RCC_PLLCKSELR_PLLSRC_Msk | RCC_PLLCKSELR_DIVM1_Msk,
-    RCC_PLLCKSELR_PLLSRC_HSE | (5U << RCC_PLLCKSELR_DIVM1_Pos)
-  );
+  MODIFY_REG(RCC->PLLCKSELR, RCC_PLLCKSELR_PLLSRC_Msk | RCC_PLLCKSELR_DIVM1_Msk,
+             RCC_PLLCKSELR_PLLSRC_HSE | (5U << RCC_PLLCKSELR_DIVM1_Pos));
 
-  MODIFY_REG(
-    RCC->PLLCFGR,
-    RCC_PLLCFGR_PLL1RGE_Msk | RCC_PLLCFGR_PLL1VCOSEL_Msk | RCC_PLLCFGR_PLL1FRACEN_Msk | RCC_PLLCFGR_DIVP1EN_Msk,
-    RCC_PLLCFGR_PLL1RGE_2 | RCC_PLLCFGR_DIVP1EN
-  );
+  MODIFY_REG(RCC->PLLCFGR,
+             RCC_PLLCFGR_PLL1RGE_Msk | RCC_PLLCFGR_PLL1VCOSEL_Msk |
+                 RCC_PLLCFGR_PLL1FRACEN_Msk | RCC_PLLCFGR_DIVP1EN_Msk |
+                 RCC_PLLCFGR_DIVQ1EN_Msk,
+             RCC_PLLCFGR_PLL1RGE_2 | RCC_PLLCFGR_DIVP1EN | RCC_PLLCFGR_DIVQ1EN);
 
   RCC->PLL1DIVR = ((192U - 1U) << RCC_PLL1DIVR_N1_Pos) |
-                  ((2U - 1U)   << RCC_PLL1DIVR_P1_Pos) |
-                  ((20U - 1U)  << RCC_PLL1DIVR_Q1_Pos) |
-                  ((2U - 1U)   << RCC_PLL1DIVR_R1_Pos);
+                  ((2U - 1U) << RCC_PLL1DIVR_P1_Pos) |
+                  ((20U - 1U) << RCC_PLL1DIVR_Q1_Pos) |
+                  ((2U - 1U) << RCC_PLL1DIVR_R1_Pos);
 
   RCC->PLL1FRACR = 0U;
 
@@ -98,32 +99,21 @@ static bool configure_pll1(void) {
 
 static void configure_bus_clocks(void) {
   MODIFY_REG(
-    RCC->D1CFGR,
-    RCC_D1CFGR_D1CPRE_Msk | RCC_D1CFGR_HPRE_Msk | RCC_D1CFGR_D1PPRE_Msk,
-    RCC_D1CFGR_D1CPRE_DIV1 | RCC_D1CFGR_HPRE_DIV2 | RCC_D1CFGR_D1PPRE_DIV2
-  );
+      RCC->D1CFGR,
+      RCC_D1CFGR_D1CPRE_Msk | RCC_D1CFGR_HPRE_Msk | RCC_D1CFGR_D1PPRE_Msk,
+      RCC_D1CFGR_D1CPRE_DIV1 | RCC_D1CFGR_HPRE_DIV2 | RCC_D1CFGR_D1PPRE_DIV2);
 
-  MODIFY_REG(
-    RCC->D2CFGR,
-    RCC_D2CFGR_D2PPRE1_Msk | RCC_D2CFGR_D2PPRE2_Msk,
-    RCC_D2CFGR_D2PPRE1_DIV2 | RCC_D2CFGR_D2PPRE2_DIV2
-  );
+  MODIFY_REG(RCC->D2CFGR, RCC_D2CFGR_D2PPRE1_Msk | RCC_D2CFGR_D2PPRE2_Msk,
+             RCC_D2CFGR_D2PPRE1_DIV2 | RCC_D2CFGR_D2PPRE2_DIV2);
 
-  MODIFY_REG(
-    RCC->D3CFGR,
-    RCC_D3CFGR_D3PPRE_Msk,
-    RCC_D3CFGR_D3PPRE_DIV2
-  );
+  MODIFY_REG(RCC->D3CFGR, RCC_D3CFGR_D3PPRE_Msk, RCC_D3CFGR_D3PPRE_DIV2);
 }
 
 static bool select_pll1_sysclk(void) {
-  MODIFY_REG(
-    RCC->CFGR,
-    RCC_CFGR_SW_Msk,
-    RCC_CFGR_SW_PLL1
-  );
+  MODIFY_REG(RCC->CFGR, RCC_CFGR_SW_Msk, RCC_CFGR_SW_PLL1);
 
-  for (uint32_t i = 0; i < CLOCK_TIMEOUT; ++i) {
+  uint32_t start = DWT->CYCCNT;
+  while (!clock_timed_out(start)) {
     if ((RCC->CFGR & RCC_CFGR_SWS_Msk) == RCC_CFGR_SWS_PLL1) {
       return true;
     }
@@ -144,7 +134,8 @@ clock_status_t clock_init(void) {
     return CLOCK_ERR_VOS;
   }
 
-  configure_flash();
+  if (!configure_flash())
+    return CLOCK_ERR_FLASH;
 
   if (!enable_hse()) {
     return CLOCK_ERR_HSE;

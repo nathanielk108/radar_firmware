@@ -15,22 +15,17 @@ bool time_init(void) {
 
   NVIC_SetPriority(SysTick_IRQn, (1U << __NVIC_PRIO_BITS) - 1U);
 
-  SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
+  SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk |
+                  SysTick_CTRL_ENABLE_Msk;
 
   return true;
 }
 
-void SysTick_Handler(void) {
-  ++system_ms;
-}
+void SysTick_Handler(void) { ++system_ms; }
 
-uint32_t time_ms(void) {
-  return system_ms;
-}
+uint32_t time_ms(void) { return system_ms; }
 
-uint32_t time_elapsed_ms(uint32_t start) {
-  return time_ms() - start;
-}
+uint32_t time_elapsed_ms(uint32_t start) { return time_ms() - start; }
 
 bool time_expired(uint32_t start, uint32_t duration) {
   return time_elapsed_ms(start) >= duration;
@@ -38,5 +33,7 @@ bool time_expired(uint32_t start, uint32_t duration) {
 
 void time_delay_ms(uint32_t duration) {
   const uint32_t start = time_ms();
-  while (!time_expired(start, duration)) { __NOP(); }
+  while (!time_expired(start, duration)) {
+    __NOP();
+  }
 }

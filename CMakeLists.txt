@@ -110,13 +110,16 @@ set(FIRMWARE_SOURCES
   src/board/board_i2c.c
   src/board/board_freq.c
   src/board/board_usb.c
-  src/system/io.c
+  src/board/board_display.c
+  src/board/board_dma.c
   src/usb/usb_descriptors.c
   src/drivers/bq25883.c
   src/drivers/adf4158.c
   src/drivers/ad4683.c
   src/drivers/ism330is.c
   src/drivers/bmi323.c
+  src/system/log.c
+  src/services/acquisition.c
 )
 
 set(VENDOR_SOURCES

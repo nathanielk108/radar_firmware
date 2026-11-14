@@ -20,3 +20,6 @@ bool board_efuse_power_good(void);
 void board_battery_charge_inhibit(bool inhibit);
 bool board_battery_power_good(void);
 bool board_battery_interrupt_active(void);
+
+/* True when PF13 is high (charging inhibited). */
+bool board_battery_charge_inhibited(void);

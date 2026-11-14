@@ -36,23 +36,22 @@ static void print_reg(const char *name, uint32_t value) {
   debug_swo_write("\r\n");
 }
 
-__attribute__((noreturn))
-void fault_handler_c(uint32_t *stack, uint32_t type) {
+__attribute__((noreturn)) void fault_handler_c(uint32_t *stack, uint32_t type) {
   debug_swo_write("\r\n*** FAULT ***\r\n");
 
   switch ((fault_type_t)type) {
-    case FAULT_HARD:
-      debug_swo_write("HardFault\r\n");
-      break;
-    case FAULT_MEMMANAGE:
-      debug_swo_write("MemManageFault\r\n");
-      break;
-    case FAULT_BUS:
-      debug_swo_write("BusFault\r\n");
-      break;
-    case FAULT_USAGE:
-      debug_swo_write("UsageFault\r\n");
-      break;
+  case FAULT_HARD:
+    debug_swo_write("HardFault\r\n");
+    break;
+  case FAULT_MEMMANAGE:
+    debug_swo_write("MemManageFault\r\n");
+    break;
+  case FAULT_BUS:
+    debug_swo_write("BusFault\r\n");
+    break;
+  case FAULT_USAGE:
+    debug_swo_write("UsageFault\r\n");
+    break;
   }
 
   /*
@@ -68,19 +67,19 @@ void fault_handler_c(uint32_t *stack, uint32_t type) {
    * stack[7] = xPSR
    */
 
-  fault_record.r0   = stack[0];
-  fault_record.r1   = stack[1];
-  fault_record.r2   = stack[2];
-  fault_record.r3   = stack[3];
-  fault_record.r12  = stack[4];
-  fault_record.lr   = stack[5];
-  fault_record.pc   = stack[6];
+  fault_record.r0 = stack[0];
+  fault_record.r1 = stack[1];
+  fault_record.r2 = stack[2];
+  fault_record.r3 = stack[3];
+  fault_record.r12 = stack[4];
+  fault_record.lr = stack[5];
+  fault_record.pc = stack[6];
   fault_record.xpsr = stack[7];
 
-  fault_record.cfsr  = SCB->CFSR;
-  fault_record.hfsr  = SCB->HFSR;
+  fault_record.cfsr = SCB->CFSR;
+  fault_record.hfsr = SCB->HFSR;
   fault_record.mmfar = SCB->MMFAR;
-  fault_record.bfar  = SCB->BFAR;
+  fault_record.bfar = SCB->BFAR;
 
   print_reg("R0  ", stack[0]);
   print_reg("R1  ", stack[1]);
@@ -101,78 +100,56 @@ void fault_handler_c(uint32_t *stack, uint32_t type) {
   print_reg("AFSR ", SCB->AFSR);
   print_reg("SHCSR", SCB->SHCSR);
 
-
-  while ((ITM->TCR & ITM_TCR_BUSY_Msk) != 0U) {
-    __NOP();
-  }
+  /* Flush the queued fault record without hanging on absent SWO. */
+  debug_swo_flush_bounded(100000U);
 
   /*
    * Only execute BKPT when a debugger is actually attached.
    * Otherwise BKPT itself can generate another fault.
    */
-  if ((CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) != 0U)
-  {
-      __BKPT(0);
+  if ((CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) != 0U) {
+    __BKPT(0);
   }
 
-  while (1)
-  {
-      __NOP();
+  while (1) {
+    __NOP();
   }
 }
 
-__attribute__((naked))
-void HardFault_Handler(void)
-{
-    __asm volatile(
-        "tst lr, #4        \n"
-        "ite eq            \n"
-        "mrseq r0, msp     \n"
-        "mrsne r0, psp     \n"
-        "movs r1, #0       \n"
-        "b fault_handler_c \n"
-    );
+__attribute__((naked)) void HardFault_Handler(void) {
+  __asm volatile("tst lr, #4        \n"
+                 "ite eq            \n"
+                 "mrseq r0, msp     \n"
+                 "mrsne r0, psp     \n"
+                 "movs r1, #0       \n"
+                 "b fault_handler_c \n");
 }
 
-__attribute__((naked))
-void MemManage_Handler(void)
-{
-    __asm volatile(
-        "tst lr, #4        \n"
-        "ite eq            \n"
-        "mrseq r0, msp     \n"
-        "mrsne r0, psp     \n"
-        "movs r1, #1       \n"
-        "b fault_handler_c \n"
-    );
+__attribute__((naked)) void MemManage_Handler(void) {
+  __asm volatile("tst lr, #4        \n"
+                 "ite eq            \n"
+                 "mrseq r0, msp     \n"
+                 "mrsne r0, psp     \n"
+                 "movs r1, #1       \n"
+                 "b fault_handler_c \n");
 }
 
-__attribute__((naked))
-void BusFault_Handler(void)
-{
-    __asm volatile(
-        "tst lr, #4        \n"
-        "ite eq            \n"
-        "mrseq r0, msp     \n"
-        "mrsne r0, psp     \n"
-        "movs r1, #2       \n"
-        "b fault_handler_c \n"
-    );
+__attribute__((naked)) void BusFault_Handler(void) {
+  __asm volatile("tst lr, #4        \n"
+                 "ite eq            \n"
+                 "mrseq r0, msp     \n"
+                 "mrsne r0, psp     \n"
+                 "movs r1, #2       \n"
+                 "b fault_handler_c \n");
 }
 
-__attribute__((naked))
-void UsageFault_Handler(void)
-{
-    __asm volatile(
-        "tst lr, #4        \n"
-        "ite eq            \n"
-        "mrseq r0, msp     \n"
-        "mrsne r0, psp     \n"
-        "movs r1, #3       \n"
-        "b fault_handler_c \n"
-    );
+__attribute__((naked)) void UsageFault_Handler(void) {
+  __asm volatile("tst lr, #4        \n"
+                 "ite eq            \n"
+                 "mrseq r0, msp     \n"
+                 "mrsne r0, psp     \n"
+                 "movs r1, #3       \n"
+                 "b fault_handler_c \n");
 }
 
-void fault_test_usage(void) {
-  __asm volatile("udf #0");
-}
+void fault_test_usage(void) { __asm volatile("udf #0"); }
