@@ -51,6 +51,7 @@ typedef struct {
   uint8_t data_size;
 
   bool software_nss;
+  bool io_swap;  /* SPI IO swap required by the PCB routing, if applicable. */
 } spi_config_t;
 
 spi_status_t spi_init(const spi_config_t *config);

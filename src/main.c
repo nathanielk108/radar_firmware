@@ -23,20 +23,29 @@
 
 #include "services/acquisition.h"
 
+#include "stm32h7xx_ll_tim.h"
+
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* 0 = PLL unprogrammed, 1 = CW, 2 = hardware sawtooth ramp. */
 #define RADAR_PLL_MODE 0
 #define DIAGNOSTIC_PERIOD_MS 1000U
+/* Optional repeated-DMA bring-up test; set to 100 after validating one read. */
+#define ADC_DMA_SELF_TEST_COUNT 0U
+
+/* TIM16 + DMA2 prototype: 64 paired conversions, then stop and dump USB CSV. */
+#define ADC_TIMED_TEST_RATE_HZ 100000U
+#define ADC_TIMED_TEST_SAMPLES 64U
+#define ADC_TIMED_TEST_PERIOD_MS 2000U
 
 static bool usb_ready;
 static bool adc_bus_ready;
+static bool adc_timed_ready;
 static bool charger_bus_ready;
 static bool imu1_bus_ready;
 static bool imu2_bus_ready;
-
-static const bq25883_t charger = {.i2c = &batt_i2c_config};
 
 static void service_io(void) {
   debug_swo_poll();
@@ -75,18 +84,27 @@ static void init_charger(void) {
     LOG_ERROR("BQ25883: I2C init failed");
     return;
   }
-  bq25883_status_t rc = bq25883_prepare_for_bringup(&charger);
+  bq25883_status_t rc = bq25883_prepare_for_bringup();
   if (rc == BQ25883_OK) {
     LOG_INFO("BQ25883: initialized");
-    bq25883_snapshot_t snap;
-    bq25883_get_snapshot(&charger, &snap);
-    if (snap.vbat_mv >= 6400) {
-      bq25883_set_charge_enabled(&charger, true);
-      LOG_INFO("BQ25883: battery detected; charge enabled");
-    } else {
-      bq25883_set_charge_enabled(&charger, false);
-      LOG_INFO("BQ25883: battery missing; charge disabled");
+    bq25883_snapshot_t snap = {0};
+    bq25883_status_t snapshot_status = bq25883_get_snapshot(&snap);
+    if (snapshot_status != BQ25883_OK) {
+      /* CE remains inhibited if battery measurement fails. */
+      LOG_ERROR("BQ25883: snapshot failed: %s",
+                bq25883_status_name(snapshot_status));
+      return;
     }
+
+    bool charge = snap.vbat_mv >= 6400U;
+    bq25883_status_t enable_status = bq25883_set_charge_enabled(charge);
+    if (enable_status != BQ25883_OK) {
+      LOG_ERROR("BQ25883: charge configuration failed: %s",
+                bq25883_status_name(enable_status));
+      return;
+    }
+    LOG_INFO("BQ25883: %s", charge ? "charge enabled"
+                                  : "battery missing; charge disabled");
   } else
     LOG_ERROR("BQ25883: init failed: %s", bq25883_status_name(rc));
 }
@@ -122,14 +140,15 @@ static void init_adc(void) {
   spi_status_t rc = spi_init(&adc_slave_spi_config);
   if (rc == SPI_STATUS_OK)
     rc = spi_init(&adc_master_spi_config);
-  adc_bus_ready = rc == SPI_STATUS_OK;
-  ad4683_status_t adc_rc = adc_bus_ready ? ad4683_init() : AD4683_ERROR_SPI;
+  bool spi_ready = rc == SPI_STATUS_OK;
+  ad4683_status_t adc_rc = spi_ready ? ad4683_init() : AD4683_ERROR_SPI;
   if (adc_rc == AD4683_OK) {
     /* First output word is from the preceding conversion. */
     ad4683_sample_t discard;
     adc_rc = ad4683_read_sample(&discard);
   }
-  if (adc_rc == AD4683_OK)
+  adc_bus_ready = adc_rc == AD4683_OK;
+  if (adc_bus_ready)
     LOG_INFO("AD4683: external reference selected");
   else
     LOG_ERROR("AD4683: %s", ad4683_status_name(adc_rc));
@@ -156,14 +175,90 @@ static void print_diagnostics(void) {
   char line[224];
   LOG_INFO("diagnostics");
   if (charger_bus_ready)
-    LOG_INFO("%s", bq25883_diagnostic(&charger, line, sizeof(line)));
-  if (adc_bus_ready)
+    LOG_INFO("%s", bq25883_diagnostic(line, sizeof(line)));
+  /* Do not use the polling ADC driver while TIM16 owns PF6 and SPI4/5. */
+  if (adc_bus_ready && !adc_timed_ready)
     LOG_INFO("%s", ad4683_diagnostic(line, sizeof(line)));
   if (imu1_bus_ready)
     LOG_INFO("%s", ism330is_diagnostic(line, sizeof(line)));
   if (imu2_bus_ready)
     LOG_INFO("%s", bmi323_diagnostic(line, sizeof(line)));
   LOG_INFO("%s", adf4158_diagnostic(line, sizeof(line)));
+}
+
+#if ADC_DMA_SELF_TEST_COUNT > 0
+static void dma_self_test(void) {
+  ad4683_sample_t sample = {0};
+  for (uint32_t i = 0U; i < ADC_DMA_SELF_TEST_COUNT; ++i) {
+    service_io();
+    acquisition_status_t status = acquisition_capture_one(&sample, 10U);
+    if (status != ACQUISITION_OK) {
+      LOG_ERROR("ADC DMA test: capture %lu failed: %s", (unsigned long)i,
+                acquisition_status_name(status));
+      return;
+    }
+    /* Conservative quiet time until hardware CS timing is measured. */
+    time_delay_ms(1U);
+  }
+  LOG_INFO("ADC DMA test: %lu captures OK (last A=%d B=%d)",
+           (unsigned long)ADC_DMA_SELF_TEST_COUNT, sample.a, sample.b);
+}
+#endif
+
+
+/* Bounded capture: no USB formatting while DMA is running. The returned
+ * pointer refers directly to noncacheable DMA SRAM; nothing is copied.
+ * Stop before printing so the next DMA block cannot overwrite it.
+ */
+static void test_timed_adc(void) {
+  if (!adc_timed_ready || !usb_console_connected())
+    return;
+
+  acquisition_status_t status = acquisition_timed_start();
+  if (status != ACQUISITION_OK) {
+    LOG_ERROR("ADC timed start: %s", acquisition_status_name(status));
+    return;
+  }
+
+  acquisition_block_t block = {0};
+  uint32_t started = time_ms();
+  do {
+    status = acquisition_timed_get_block(&block);
+    if (status != ACQUISITION_BUSY)
+      break;
+  } while (!time_expired(started, 10U));
+
+  acquisition_status_t stopped = acquisition_timed_stop();
+  if (status == ACQUISITION_BUSY)
+    status = ACQUISITION_TIMEOUT;
+  if (status != ACQUISITION_OK || stopped != ACQUISITION_OK) {
+    char line[200];
+    LOG_INFO("%s", acquisition_diagnostic(line, 200));
+    LOG_ERROR("ADC timed capture: %s, stop: %s",
+              acquisition_status_name(status),
+              acquisition_status_name(stopped));
+    return;
+  }
+
+  /* Print data AFTER stopping, using CDC regardless of PRINTF_OUT setting. */
+  char line[80];
+  int length = snprintf(line, sizeof(line),
+                        "# ADC block %lu, %lu SPS, %u pairs\r\n"
+                        "index,adc_a,adc_b\r\n",
+                        (unsigned long)block.sequence,
+                        (unsigned long)ADC_TIMED_TEST_RATE_HZ,
+                        (unsigned int)block.count);
+  if (length > 0 && (size_t)length < sizeof(line))
+    (void)usb_console_write_bytes(line, (size_t)length);
+  for (uint16_t i = 0U; i < block.count; ++i) {
+    length = snprintf(line, sizeof(line), "%u,%d,%d\r\n",
+                      (unsigned int)i, (int)(int16_t)block.a[i],
+                      (int)(int16_t)block.b[i]);
+    if (length > 0 && (size_t)length < sizeof(line))
+      (void)usb_console_write_bytes(line, (size_t)length);
+    service_io();
+  }
+  (void)acquisition_timed_release_block(block.sequence);
 }
 
 int main(void) {
@@ -175,19 +270,55 @@ int main(void) {
   init_adc();
   init_pll();
 
-  acquisition_init();
+  bool dma_ready = false;
+  if (adc_bus_ready) {
+    acquisition_status_t init_status = acquisition_init();
+    dma_ready = init_status == ACQUISITION_OK;
+    if (!dma_ready)
+      LOG_ERROR("ADC DMA init: %s", acquisition_status_name(init_status));
+  }
 
+#if ADC_DMA_SELF_TEST_COUNT > 0
+  if (dma_ready)
+    dma_self_test();
+#endif
+
+  if (dma_ready) {
+    const acquisition_timed_config_t cfg = {
+      .sample_rate_hz = ADC_TIMED_TEST_RATE_HZ,
+      .samples_per_block = ADC_TIMED_TEST_SAMPLES
+    };
+    acquisition_status_t rc = acquisition_timed_init(&cfg);
+    adc_timed_ready = rc == ACQUISITION_OK;
+    if (adc_timed_ready)
+      LOG_INFO("ADC timed DMA ready: %lu SPS, %u pairs/block",
+               (unsigned long)cfg.sample_rate_hz,
+               (unsigned int)cfg.samples_per_block);
+    else
+      LOG_ERROR("ADC timed init: %s", acquisition_status_name(rc));
+  }
+
+  uint32_t last_timed_test = time_ms();
   uint32_t last = time_ms();
   for (;;) {
     service_io();
+    if (adc_timed_ready &&
+        time_expired(last_timed_test, ADC_TIMED_TEST_PERIOD_MS)) {
+      last_timed_test = time_ms();
+      test_timed_adc();
+    }
     if (time_expired(last, DIAGNOSTIC_PERIOD_MS)) {
       last = time_ms(); /* Skip missed periods; never print catch-up bursts. */
-      ad4683_sample_t sample = {0};
-      acquisition_status_t status = acquisition_capture_one(&sample, 10);
-      if (status != ACQUISITION_OK) {
-        LOG_ERROR("DMA Capture Failed: %s", acquisition_status_name(status));
-      } else {
-        LOG_INFO("DMA Capture: %d, %d", sample.a, sample.b);
+      if (dma_ready && !adc_timed_ready) {
+        ad4683_sample_t sample = {0};
+        acquisition_status_t status = acquisition_capture_one(&sample, 10U);
+        if (status != ACQUISITION_OK) {
+          LOG_ERROR("DMA capture: %s", acquisition_status_name(status));
+          if (status == ACQUISITION_NOT_READY)
+            dma_ready = false;
+        } else {
+          LOG_INFO("DMA capture: %d, %d", sample.a, sample.b);
+        }
       }
       print_diagnostics();
     }

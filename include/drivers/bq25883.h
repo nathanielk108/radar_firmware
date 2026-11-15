@@ -1,7 +1,6 @@
 #pragma once
 #include <stddef.h>
 
-#include "platform/i2c.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -69,10 +68,6 @@ typedef enum {
 } bq25883_charge_state_t;
 
 typedef struct {
-  const i2c_config_t *i2c;
-} bq25883_t;
-
-typedef struct {
   uint8_t status1;
   uint8_t status2;
   uint8_t ntc;
@@ -96,27 +91,22 @@ typedef struct {
   uint16_t tdie_half_c;
 } bq25883_snapshot_t;
 
-bq25883_status_t bq25883_check_id(const bq25883_t *dev, uint8_t *part_info);
-bq25883_status_t bq25883_set_charge_enabled(const bq25883_t *dev, bool enable);
-bq25883_status_t bq25883_set_otg_enabled(const bq25883_t *dev, bool enable);
-bq25883_status_t bq25883_disable_watchdog(const bq25883_t *dev);
-bq25883_status_t bq25883_set_charge_voltage_mv(const bq25883_t *dev,
-                                               uint16_t mv);
-bq25883_status_t bq25883_set_charge_current_ma(const bq25883_t *dev,
-                                               uint16_t ma);
-bq25883_status_t bq25883_set_input_current_limit_ma(const bq25883_t *dev,
-                                                    uint16_t ma);
-bq25883_status_t bq25883_set_precharge_termination_ma(const bq25883_t *dev,
-                                                      uint16_t precharge_ma,
+bq25883_status_t bq25883_check_id(uint8_t *part_info);
+bq25883_status_t bq25883_set_charge_enabled(bool enable);
+bq25883_status_t bq25883_set_otg_enabled(bool enable);
+bq25883_status_t bq25883_disable_watchdog(void);
+bq25883_status_t bq25883_set_charge_voltage_mv(uint16_t mv);
+bq25883_status_t bq25883_set_charge_current_ma(uint16_t ma);
+bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma);
+bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma);
 /* Enable the free-running ADC (called once during setup). */
-bq25883_status_t bq25883_adc_convert(const bq25883_t *dev);
-bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev,
-                                      bq25883_snapshot_t *s);
-bq25883_status_t bq25883_prepare_for_bringup(const bq25883_t *dev);
+bq25883_status_t bq25883_adc_convert(void);
+bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *s);
+bq25883_status_t bq25883_prepare_for_bringup(void);
 bool bq25883_power_good(void);
 
 /* Returns the caller-owned buffer; do not call from an ISR. */
-const char *bq25883_diagnostic(const bq25883_t *dev, char *buf, size_t size);
+const char *bq25883_diagnostic(char *buf, size_t size);
 
 const char *bq25883_status_name(bq25883_status_t status);

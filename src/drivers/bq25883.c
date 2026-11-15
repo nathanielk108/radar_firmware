@@ -1,5 +1,7 @@
 #include "drivers/bq25883.h"
 #include "board/board_power.h"
+#include "board/board_i2c.h"
+#include "platform/i2c.h"
 #include <stdio.h>
 
 static bq25883_status_t map_i2c_status(i2c_status_t status) {
@@ -54,39 +56,35 @@ const char *bq25883_status_name(bq25883_status_t status) {
   }
 }
 
-static bq25883_status_t bq25883_read_reg(const bq25883_t *dev, uint8_t reg,
+static bq25883_status_t bq25883_read_reg(uint8_t reg,
                                          uint8_t *value) {
-  if ((dev == NULL) || (dev->i2c == NULL) || (value == NULL)) {
+  if (value == NULL) {
     return BQ25883_ERROR_INVALID_ARGUMENT;
   }
 
   i2c_status_t result =
-      i2c_write_read(dev->i2c, BQ25883_I2C_ADDRESS, &reg, 1U, value, 1U, 20U);
+      i2c_write_read(&batt_i2c_config, BQ25883_I2C_ADDRESS, &reg, 1U, value, 1U, 20U);
 
   return map_i2c_status(result);
 }
 
-static bq25883_status_t bq25883_write_reg(const bq25883_t *dev, uint8_t reg,
+static bq25883_status_t bq25883_write_reg(uint8_t reg,
                                           uint8_t value) {
-  if ((dev == NULL) || (dev->i2c == NULL)) {
-    return BQ25883_ERROR_INVALID_ARGUMENT;
-  }
-
   uint8_t data[2] = {reg, value};
 
-  i2c_status_t result = i2c_write(dev->i2c, BQ25883_I2C_ADDRESS, data, 2U, 20U);
+  i2c_status_t result = i2c_write(&batt_i2c_config, BQ25883_I2C_ADDRESS, data, 2U, 20U);
 
   return map_i2c_status(result);
 }
 
-static bq25883_status_t bq25883_write_verify(const bq25883_t *dev, uint8_t reg,
+static bq25883_status_t bq25883_write_verify(uint8_t reg,
                                              uint8_t value, uint8_t mask) {
-  bq25883_status_t status = bq25883_write_reg(dev, reg, value);
+  bq25883_status_t status = bq25883_write_reg(reg, value);
   if (status != BQ25883_OK)
     return status;
 
   uint8_t readback;
-  status = bq25883_read_reg(dev, reg, &readback);
+  status = bq25883_read_reg(reg, &readback);
   if (status != BQ25883_OK)
     return status;
 
@@ -94,22 +92,22 @@ static bq25883_status_t bq25883_write_verify(const bq25883_t *dev, uint8_t reg,
                                                : BQ25883_ERROR_VERIFY;
 }
 
-static bq25883_status_t bq25883_update_bits(const bq25883_t *dev, uint8_t reg,
+static bq25883_status_t bq25883_update_bits(uint8_t reg,
                                             uint8_t mask, uint8_t value) {
   uint8_t current;
-  bq25883_status_t status = bq25883_read_reg(dev, reg, &current);
+  bq25883_status_t status = bq25883_read_reg(reg, &current);
   if (status != BQ25883_OK)
     return status;
 
   uint8_t updated = (uint8_t)((current & (uint8_t)~mask) | (value & mask));
-  return bq25883_write_verify(dev, reg, updated, mask);
+  return bq25883_write_verify(reg, updated, mask);
 }
 
-bq25883_status_t bq25883_check_id(const bq25883_t *dev, uint8_t *part_info) {
+bq25883_status_t bq25883_check_id(uint8_t *part_info) {
   uint8_t value;
 
   bq25883_status_t status =
-      bq25883_read_reg(dev, BQ25883_REG_PART_INFO, &value);
+      bq25883_read_reg(BQ25883_REG_PART_INFO, &value);
 
   if (status != BQ25883_OK) {
     return status;
@@ -128,11 +126,11 @@ bq25883_status_t bq25883_check_id(const bq25883_t *dev, uint8_t *part_info) {
   return BQ25883_OK;
 }
 
-bq25883_status_t bq25883_set_charge_enabled(const bq25883_t *dev, bool enable) {
+bq25883_status_t bq25883_set_charge_enabled(bool enable) {
   /* Never assert active-low CE until the register write is verified. */
   board_battery_charge_inhibit(true);
 
-  bq25883_status_t status = bq25883_update_bits(dev, BQ25883_REG_CTRL2, 1U << 3,
+  bq25883_status_t status = bq25883_update_bits(BQ25883_REG_CTRL2, 1U << 3,
                                                 enable ? (1U << 3) : 0U);
   if (status != BQ25883_OK)
     return status;
@@ -142,35 +140,33 @@ bq25883_status_t bq25883_set_charge_enabled(const bq25883_t *dev, bool enable) {
   return BQ25883_OK;
 }
 
-bq25883_status_t bq25883_set_otg_enabled(const bq25883_t *dev, bool enable) {
-  return bq25883_update_bits(dev, BQ25883_REG_CTRL2, 1U << 7,
+bq25883_status_t bq25883_set_otg_enabled(bool enable) {
+  return bq25883_update_bits(BQ25883_REG_CTRL2, 1U << 7,
                              enable ? (1U << 7) : 0U);
 }
 
-bq25883_status_t bq25883_disable_watchdog(const bq25883_t *dev) {
-  return bq25883_update_bits(dev, BQ25883_REG_CTRL1, 0x30U, 0x00U);
+bq25883_status_t bq25883_disable_watchdog(void) {
+  return bq25883_update_bits(BQ25883_REG_CTRL1, 0x30U, 0x00U);
 }
 
-bq25883_status_t bq25883_set_charge_voltage_mv(const bq25883_t *dev,
-                                               uint16_t mv) {
+bq25883_status_t bq25883_set_charge_voltage_mv(uint16_t mv) {
   if ((mv < 6800U) || (mv > 9200U)) {
     return BQ25883_ERROR_RANGE;
   }
 
   uint8_t code = (uint8_t)((mv - 6800U) / 10U);
 
-  return bq25883_write_verify(dev, BQ25883_REG_VREG, code, 0xFFU);
+  return bq25883_write_verify(BQ25883_REG_VREG, code, 0xFFU);
 }
 
-bq25883_status_t bq25883_set_charge_current_ma(const bq25883_t *dev,
-                                               uint16_t ma) {
+bq25883_status_t bq25883_set_charge_current_ma(uint16_t ma) {
   if ((ma < 100U) || (ma > 2200U)) {
     return BQ25883_ERROR_RANGE;
   }
 
   uint8_t reg;
 
-  bq25883_status_t status = bq25883_read_reg(dev, BQ25883_REG_ICHG, &reg);
+  bq25883_status_t status = bq25883_read_reg(BQ25883_REG_ICHG, &reg);
 
   if (status != BQ25883_OK) {
     return status;
@@ -181,18 +177,17 @@ bq25883_status_t bq25883_set_charge_current_ma(const bq25883_t *dev,
   reg &= 0xC0U;
   reg |= code & 0x3FU;
 
-  return bq25883_write_verify(dev, BQ25883_REG_ICHG, reg, 0x3FU);
+  return bq25883_write_verify(BQ25883_REG_ICHG, reg, 0x3FU);
 }
 
-bq25883_status_t bq25883_set_input_current_limit_ma(const bq25883_t *dev,
-                                                    uint16_t ma) {
+bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma) {
   if ((ma < 500U) || (ma > 3300U)) {
     return BQ25883_ERROR_RANGE;
   }
 
   uint8_t reg;
 
-  bq25883_status_t status = bq25883_read_reg(dev, BQ25883_REG_IINDPM, &reg);
+  bq25883_status_t status = bq25883_read_reg(BQ25883_REG_IINDPM, &reg);
 
   if (status != BQ25883_OK) {
     return status;
@@ -203,11 +198,10 @@ bq25883_status_t bq25883_set_input_current_limit_ma(const bq25883_t *dev,
   reg &= 0xE0U;
   reg |= code & 0x1FU;
 
-  return bq25883_write_verify(dev, BQ25883_REG_IINDPM, reg, 0x1FU);
+  return bq25883_write_verify(BQ25883_REG_IINDPM, reg, 0x1FU);
 }
 
-bq25883_status_t bq25883_set_precharge_termination_ma(const bq25883_t *dev,
-                                                      uint16_t precharge_ma,
+bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma) {
   if ((precharge_ma < 50U) || (precharge_ma > 800U) || (termination_ma < 50U) ||
       (termination_ma > 800U)) {
@@ -220,21 +214,20 @@ bq25883_status_t bq25883_set_precharge_termination_ma(const bq25883_t *dev,
 
   uint8_t value = (uint8_t)((pre << 4U) | term);
 
-  return bq25883_write_verify(dev, BQ25883_REG_PRE_TERM, value, 0xFFU);
+  return bq25883_write_verify(BQ25883_REG_PRE_TERM, value, 0xFFU);
 }
 
 /* The ADC is free-running; enable once, not on every status read. */
-bq25883_status_t bq25883_adc_convert(const bq25883_t *dev) {
-  return bq25883_update_bits(dev, BQ25883_REG_ADC_CTRL, 0xF0U,
+bq25883_status_t bq25883_adc_convert(void) {
+  return bq25883_update_bits(BQ25883_REG_ADC_CTRL, 0xF0U,
                              0x80U); /* continuous, 15-bit */
 }
 
-static bq25883_status_t bq25883_read_adc16(const bq25883_t *dev,
-                                           uint8_t high_reg, uint16_t *value) {
-  if (!dev || !dev->i2c || !value)
+static bq25883_status_t bq25883_read_adc16(uint8_t high_reg, uint16_t *value) {
+  if (!value)
     return BQ25883_ERROR_INVALID_ARGUMENT;
   uint8_t raw[2];
-  i2c_status_t status = i2c_write_read(dev->i2c, BQ25883_I2C_ADDRESS, &high_reg,
+  i2c_status_t status = i2c_write_read(&batt_i2c_config, BQ25883_I2C_ADDRESS, &high_reg,
                                        1U, raw, 2U, 20U);
   if (status != I2C_STATUS_OK)
     return map_i2c_status(status);
@@ -242,57 +235,56 @@ static bq25883_status_t bq25883_read_adc16(const bq25883_t *dev,
   return BQ25883_OK;
 }
 
-bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev,
-                                      bq25883_snapshot_t *s) {
+bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *s) {
   if (s == NULL) {
     return BQ25883_ERROR_INVALID_ARGUMENT;
   }
 
   bq25883_status_t status;
 
-  status = bq25883_read_reg(dev, BQ25883_REG_STATUS1, &s->status1);
+  status = bq25883_read_reg(BQ25883_REG_STATUS1, &s->status1);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_reg(dev, BQ25883_REG_STATUS2, &s->status2);
+  status = bq25883_read_reg(BQ25883_REG_STATUS2, &s->status2);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_reg(dev, BQ25883_REG_NTC, &s->ntc);
+  status = bq25883_read_reg(BQ25883_REG_NTC, &s->ntc);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_reg(dev, BQ25883_REG_FAULT, &s->fault);
+  status = bq25883_read_reg(BQ25883_REG_FAULT, &s->fault);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_adc16(dev, BQ25883_REG_VBUS_H, &s->vbus_mv);
+  status = bq25883_read_adc16(BQ25883_REG_VBUS_H, &s->vbus_mv);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_adc16(dev, BQ25883_REG_VBAT_H, &s->vbat_mv);
+  status = bq25883_read_adc16(BQ25883_REG_VBAT_H, &s->vbat_mv);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_read_adc16(dev, BQ25883_REG_VSYS_H, &s->vsys_mv);
+  status = bq25883_read_adc16(BQ25883_REG_VSYS_H, &s->vsys_mv);
   if (status != BQ25883_OK)
     return status;
 
   uint16_t ichg;
 
-  status = bq25883_read_adc16(dev, BQ25883_REG_ICHG_H, &ichg);
+  status = bq25883_read_adc16(BQ25883_REG_ICHG_H, &ichg);
   if (status != BQ25883_OK)
     return status;
 
   s->ichg_ma = (uint16_t)ichg;
 
   uint16_t ibus_raw;
-  status = bq25883_read_adc16(dev, BQ25883_REG_IBUS_H, &ibus_raw);
+  status = bq25883_read_adc16(BQ25883_REG_IBUS_H, &ibus_raw);
   if (status != BQ25883_OK)
     return status;
   s->ibus_ma = (int16_t)ibus_raw;
 
-  status = bq25883_read_adc16(dev, BQ25883_REG_TDIE_H, &s->tdie_half_c);
+  status = bq25883_read_adc16(BQ25883_REG_TDIE_H, &s->tdie_half_c);
   if (status != BQ25883_OK)
     return status;
 
@@ -313,69 +305,69 @@ bq25883_status_t bq25883_get_snapshot(const bq25883_t *dev,
   return BQ25883_OK;
 }
 
-bq25883_status_t bq25883_prepare_for_bringup(const bq25883_t *dev) {
+bq25883_status_t bq25883_prepare_for_bringup(void) {
   /* Hold the hardware inhibit before any I2C communication. */
   board_battery_charge_inhibit(true);
-  bq25883_status_t status = bq25883_check_id(dev, NULL);
+  bq25883_status_t status = bq25883_check_id(NULL);
   if (status != BQ25883_OK)
     return status;
 
   /*
    * First action: make sure charger and OTG are off.
    */
-  status = bq25883_set_charge_enabled(dev, false);
+  status = bq25883_set_charge_enabled(false);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_set_otg_enabled(dev, false);
+  status = bq25883_set_otg_enabled(false);
   if (status != BQ25883_OK)
     return status;
 
   /*
    * Prevent watchdog from silently restoring defaults.
    */
-  status = bq25883_disable_watchdog(dev);
+  status = bq25883_disable_watchdog();
   if (status != BQ25883_OK)
     return status;
 
   /*
    * Conservative initial limits.
    */
-  status = bq25883_set_input_current_limit_ma(dev, 500);
+  status = bq25883_set_input_current_limit_ma(500);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_set_charge_current_ma(dev, 500);
+  status = bq25883_set_charge_current_ma(500);
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_set_precharge_termination_ma(dev, 50, 50);
+  status = bq25883_set_precharge_termination_ma(50, 50);
   if (status != BQ25883_OK)
     return status;
 
   /*
    * Bring-up value, not necessarily final pack value.
    */
-  status = bq25883_set_charge_voltage_mv(dev, 8200);
+  status = bq25883_set_charge_voltage_mv(8200);
   if (status != BQ25883_OK)
     return status;
 
   /*
    * Keep charging disabled.
    */
-  status = bq25883_set_charge_enabled(dev, false);
+  status = bq25883_set_charge_enabled(false);
   if (status != BQ25883_OK)
     return status;
-  return bq25883_adc_convert(dev);
+  return bq25883_adc_convert();
 }
 
 bool bq25883_power_good(void) { return board_battery_power_good(); }
 
-const char *bq25883_diagnostic(const bq25883_t *dev, char *buf, size_t size) {
+const char *bq25883_diagnostic(char *buf, size_t size) {
   if (!buf || !size)
     return "BQ25883: invalid buffer";
   bq25883_snapshot_t data = {0};
-  bq25883_status_t status = bq25883_get_snapshot(dev, &data);
+  bq25883_status_t status = bq25883_get_snapshot(&data);
   if (status != BQ25883_OK) {
     (void)snprintf(buf, size, "BQ25883: %s", bq25883_status_name(status));
     return buf;

@@ -13,5 +13,3 @@ void board_i2c_batt_init(void) {
                  LL_GPIO_OUTPUT_OPENDRAIN, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_HIGH, BATT_SDA_AF, false);
 }
-
-void board_i2c_init(void) { board_i2c_batt_init(); }

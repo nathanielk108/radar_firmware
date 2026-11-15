@@ -82,6 +82,7 @@
 
 #define ADC_A_CS_PORT GPIOF
 #define ADC_A_CS_PIN 6U
+#define ADC_A_CS_AF 1U
 
 #define ADC_A_SCK_PORT GPIOF
 #define ADC_A_SCK_PIN 7U

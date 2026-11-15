@@ -11,6 +11,7 @@ const spi_config_t imu1_spi_config = {
     .baud_divider = SPI_DIV_16,
     .data_size = 8U,
     .software_nss = true,
+    .io_swap = true,
 };
 
 const spi_config_t imu2_spi_config = {
@@ -103,7 +104,7 @@ void board_spi_adc_init(void) {
 
   board_gpio_pin(ADC_A_CS_PORT, ADC_A_CS_PIN, LL_GPIO_MODE_OUTPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
-                 LL_GPIO_SPEED_FREQ_LOW, 0U, true);
+                 LL_GPIO_SPEED_FREQ_VERY_HIGH, 0U, true);
 
   board_gpio_pin(ADC_B_SCK_PORT, ADC_B_SCK_PIN, LL_GPIO_MODE_ALTERNATE,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
@@ -116,10 +117,4 @@ void board_spi_adc_init(void) {
   board_gpio_pin(ADC_B_CS_PORT, ADC_B_CS_PIN, LL_GPIO_MODE_ALTERNATE,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_LOW, ADC_B_CS_AF, false);
-}
-
-void board_spi_init(void) {
-  board_spi_imu1_init();
-  board_spi_imu2_init();
-  board_spi_adc_init();
 }

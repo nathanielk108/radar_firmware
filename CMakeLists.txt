@@ -112,6 +112,7 @@ set(FIRMWARE_SOURCES
   src/board/board_usb.c
   src/board/board_display.c
   src/board/board_dma.c
+  src/board/board_timer.c
   src/usb/usb_descriptors.c
   src/drivers/bq25883.c
   src/drivers/adf4158.c

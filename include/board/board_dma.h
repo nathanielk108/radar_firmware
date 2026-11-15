@@ -1,5 +1,7 @@
 #pragma once
 
-#include <stdint.h>
-
-void board_dma_adc_init(uint16_t *tx, uint16_t *rx_a, uint16_t *rx_b);
+/* DMA2 is reserved for AD4683 acquisition (SPI5 TX/RX and SPI4 RX).
+ * Stream setup and transfer state are owned by services/acquisition.c.
+ */
+void board_dma_adc_init(void);
+void board_dma_adc_enable_irqs(void);

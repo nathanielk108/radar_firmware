@@ -5,7 +5,7 @@
 #include "stm32h7xx_ll_gpio.h"
 #include "stm32h7xx_ll_spi.h"
 
-/* Both drivers are polling-only; DMA will replace this path for acquisition. */
+/* Polling SPI transactions. AD4683 DMA capture lives in services/acquisition.c. */
 static bool enable_clock(SPI_TypeDef *spi) {
   if (spi == SPI1)
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SPI1);
@@ -121,9 +121,8 @@ spi_status_t spi_init(const spi_config_t *cfg) {
                                       ? LL_SPI_LSB_FIRST
                                       : LL_SPI_MSB_FIRST);
   clear_flags(spi);
-  if (spi == SPI1) {
+  if (cfg->io_swap)
     LL_SPI_EnableIOSwap(spi);
-  }
   LL_SPI_Enable(spi);
   return SPI_STATUS_OK;
 }
