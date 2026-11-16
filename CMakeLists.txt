@@ -59,9 +59,11 @@ set(FIRMWARE_SOURCES
   src/drivers/ad4683.c
   src/drivers/ism330is.c
   src/drivers/bmi323.c
+  src/drivers/st7789.c
   src/system/log.c
   src/services/acquisition.c
   src/services/chirp.c
+  src/services/display.c
   src/services/motion.c
   src/services/usb_charge.c
 )
