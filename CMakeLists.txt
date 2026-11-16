@@ -71,6 +71,7 @@ set(FIRMWARE_SOURCES
   src/services/chirp.c
   src/services/display.c
   src/services/motion.c
+  src/services/recording.c
   src/services/storage.c
   src/services/usb_charge.c
 )

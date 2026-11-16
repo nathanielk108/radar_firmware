@@ -2,6 +2,7 @@
 #include "platform/debug_swo.h"
 #include "platform/time.h"
 #include "platform/usb.h"
+#include "services/recording.h"
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -15,10 +16,6 @@
 #define LOG_BUFFER_BYTES 384U
 
 void log_write(log_level_t level, const char *format, ...) {
-#if PRINTF_OUT == 0
-  (void)level;
-  (void)format;
-#else
   if (!format)
     return;
   char message[LOG_BUFFER_BYTES];
@@ -44,11 +41,12 @@ void log_write(log_level_t level, const char *format, ...) {
   message[length++] = '\r';
   message[length++] = '\n';
 
+  recording_note(message, length);
+
 #if PRINTF_OUT == 1 || PRINTF_OUT == 3
   (void)debug_swo_write_bytes(message, length);
 #endif
 #if PRINTF_OUT == 2 || PRINTF_OUT == 3
   (void)usb_console_write_bytes(message, length);
-#endif
 #endif
 }
