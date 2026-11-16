@@ -62,6 +62,7 @@ set(FIRMWARE_SOURCES
   src/system/log.c
   src/services/acquisition.c
   src/services/chirp.c
+  src/services/motion.c
   src/services/usb_charge.c
 )
 

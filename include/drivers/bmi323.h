@@ -10,6 +10,7 @@ typedef enum {
   BMI323_ERROR_MODE_FAULT,
   BMI323_ERROR_SPI,
   BMI323_ERROR_DEVICE_ID,
+  BMI323_NO_NEW_SAMPLE,
 } bmi323_status_t;
 
 const char *bmi323_status_name(bmi323_status_t status);
@@ -20,3 +21,4 @@ const char *bmi323_status_name(bmi323_status_t status);
 /* Requires board_spi_imu2_init() and spi_init(&imu2_spi_config). */
 bmi323_status_t bmi323_init(void);
 bmi323_status_t bmi323_read_id(uint16_t *id);
+bmi323_status_t bmi323_read_sample(int16_t accel[3], int16_t gyro[3]);

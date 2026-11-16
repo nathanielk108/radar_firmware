@@ -10,6 +10,7 @@ typedef enum {
   ISM330IS_ERROR_MODE_FAULT,
   ISM330IS_ERROR_SPI,
   ISM330IS_ERROR_DEVICE_ID,
+  ISM330IS_NO_NEW_SAMPLE,
 } ism330is_status_t;
 
 const char *ism330is_status_name(ism330is_status_t status);
@@ -21,3 +22,4 @@ const char *ism330is_status_name(ism330is_status_t status);
 ism330is_status_t ism330is_read_id(uint8_t *id);
 
 ism330is_status_t ism330is_init(void);
+ism330is_status_t ism330is_read_sample(int16_t accel[3], int16_t gyro[3]);
