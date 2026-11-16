@@ -13,8 +13,8 @@ CMakeUserPresets.json
 .cache
 
 build
+**/__pycache__
 vendor/*
-radar_firmware.zip
 *.zip
 
 # CLion

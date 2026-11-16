@@ -67,10 +67,16 @@ command to SPI5 at the TIM16_CH1 compare, which also drives CS low. At
 
 Send lowercase `c` over the digital board's native USB CDC port to capture one
 chirp. The firmware sends a metadata line followed by 61 rows of signed ADC
-codes. Save the terminal output as `capture.csv` and run
-`python scripts/chirp_range.py capture.csv` to estimate the strongest beat
-frequency and corresponding range on each channel. Use a stationary reflector
-at a known distance to check the estimates.
+codes. Save the terminal output as `capture.csv`. Run
+`python scripts/chirp_range.py capture.csv --channel b --peaks 5` to compare
+the main beat peaks and their levels on channel B. With no options, the tool
+reports the strongest peak on each channel. For a range check, keep the radar
+fixed and repeat captures with the reflector in place and removed. Check that a
+peak near the expected frequency appears with the reflector and moves with it.
+
+Run `python scripts/plot_chirp_spectrum.py` to plot channel B from the three
+outdoor captures together. The script uses NumPy and Matplotlib. Pass CSV paths
+to compare other captures, and use `--output spectrum.png` to save the plot.
 
 The ADF4158 uses TXDATA as its external step clock (R5.DB29), selects single
 ramp mode, and holds the terminal frequency through the ADC drain frame.

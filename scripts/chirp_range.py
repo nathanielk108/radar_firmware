@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Estimate the range of the strongest beat tone in each chirp channel."""
+"""Report beat peaks and their apparent ranges at the programmed chirp slope."""
 
 import argparse
 import cmath
@@ -9,6 +9,7 @@ import sys
 
 METADATA_KEYS = ("sample_rate_hz", "step_hz", "step_rate_hz", "samples")
 SPEED_OF_LIGHT_M_S = 299_792_458
+ADC_FULL_SCALE = 32768
 
 
 def read_capture(lines):
@@ -43,13 +44,16 @@ def read_capture(lines):
   return sample_rate, step_hz * step_rate, (adc_a, adc_b)
 
 
-def peak_frequency(samples, sample_rate, window):
+def beat_peaks(samples, sample_rate, window):
   count = len(samples)
   mean = sum(samples) / count
   centered = [value - mean for value in samples]
+  window_sum = count
   if window == "hann":
-    centered = [value * (0.5 - 0.5 * math.cos(math.tau * i / (count - 1)))
-                for i, value in enumerate(centered)]
+    weights = [0.5 - 0.5 * math.cos(math.tau * i / (count - 1))
+               for i in range(count)]
+    centered = [value * weight for value, weight in zip(centered, weights)]
+    window_sum = sum(weights)
 
   powers = [0.0]
   for k in range(1, count // 2 + 1):
@@ -57,39 +61,63 @@ def peak_frequency(samples, sample_rate, window):
                for i, value in enumerate(centered))
     powers.append(abs(tone) ** 2)
 
-  peak = max(range(1, len(powers)), key=powers.__getitem__)
-  if powers[peak] == 0:
-    return None
+  last_bin = count // 2
+  powers.append(0.0)
+  peaks = [k for k in range(1, last_bin + 1)
+           if powers[k - 1] < powers[k] >= powers[k + 1]]
+  peaks.sort(key=powers.__getitem__, reverse=True)
 
-  # A parabola through the three log-power bins estimates the sub-bin peak.
-  offset = 0.0
-  if 1 < peak < len(powers) - 1 and min(powers[peak - 1:peak + 2]) > 0:
-    left, center, right = map(math.log, powers[peak - 1:peak + 2])
-    curvature = left - 2 * center + right
-    if curvature < 0:
-      offset = 0.5 * (left - right) / curvature
-  return (peak + offset) * sample_rate / count
+  for peak in peaks:
+    offset = 0.0
+    power = powers[peak]
+    neighbors = powers[peak - 1:peak + 2]
+    if 1 < peak < last_bin and min(neighbors) > 0:
+      # Interpolate the peak frequency and height in log power.
+      left, center, right = map(math.log, neighbors)
+      curvature = left - 2 * center + right
+      if curvature < 0:
+        offset = 0.5 * (left - right) / curvature
+        power = math.exp(center - 0.25 * (left - right) * offset)
+    frequency = (peak + offset) * sample_rate / count
+    scale = 1 if 2 * peak == count else 2
+    amplitude = scale * math.sqrt(power) / window_sum
+    yield frequency, 20 * math.log10(amplitude / ADC_FULL_SCALE)
 
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("csv", type=argparse.FileType("r", encoding="utf-8-sig"),
                       help="firmware USB CDC capture, or - for stdin")
+  parser.add_argument("--channel", choices=("a", "b", "both"), default="both")
+  parser.add_argument("--peaks", type=int, default=1,
+                      help="maximum number of local peaks per channel, ranked by level")
   parser.add_argument("--window", choices=("hann", "rectangular"), default="hann")
   args = parser.parse_args()
+  if args.peaks < 1:
+    parser.error("--peaks must be at least 1")
   try:
     sample_rate, slope, channels = read_capture(iter(args.csv))
   except (KeyError, OSError, ValueError) as error:
     parser.exit(2, f"{parser.prog}: {error}\n")
 
-  for name, samples in zip(("adc_a", "adc_b"), channels):
-    frequency = peak_frequency(samples, sample_rate, args.window)
-    if frequency is None:
+  for channel, samples in zip(("a", "b"), channels):
+    if args.channel not in (channel, "both"):
+      continue
+    name = f"adc_{channel}"
+    peaks = list(beat_peaks(samples, sample_rate, args.window))
+    if args.peaks > 1:
+      peaks.sort(key=lambda peak: peak[1], reverse=True)
+    if not peaks:
       print(f"{name}: no non-DC peak")
-    else:
+    for rank, (frequency, level) in enumerate(peaks[:args.peaks], 1):
       distance = SPEED_OF_LIGHT_M_S * frequency / (2 * slope)
-      print(f"{name}: {frequency:.1f} Hz, {distance:.2f} m")
-  print("Peak estimates can include clutter or interference.", file=sys.stderr)
+      result = f"{frequency:.1f} Hz, {distance:.2f} m"
+      if args.peaks == 1:
+        print(f"{name}: {result}")
+      else:
+        print(f"{name} peak {rank}: {result}, {level:.1f} dBFS")
+  print("Beat peaks can include harmonics, clutter, or interference.",
+        file=sys.stderr)
 
 
 if __name__ == "__main__":
