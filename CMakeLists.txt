@@ -19,10 +19,15 @@ set(STM32CUBE_H7
 )
 set(CMSIS_CORE ${STM32CUBE_H7}/Drivers/CMSIS)
 set(CMSIS_DEVICE ${CMSIS_CORE}/Device/ST/STM32H7xx)
-set(STM32_HAL_DRIVER_INC ${STM32CUBE_H7}/Drivers/STM32H7xx_HAL_Driver/Inc)
+set(STM32_HAL_DRIVER ${STM32CUBE_H7}/Drivers/STM32H7xx_HAL_Driver)
+set(STM32_HAL_DRIVER_INC ${STM32_HAL_DRIVER}/Inc)
+set(FATFS ${STM32CUBE_H7}/Middlewares/Third_Party/FatFs/src)
 if(NOT EXISTS "${STM32_HAL_DRIVER_INC}/stm32h7xx_ll_gpio.h"
    OR NOT EXISTS "${CMSIS_DEVICE}/Include/stm32h7xx.h")
   message(FATAL_ERROR "STM32CubeH7 CMSIS/LL headers missing under ${STM32CUBE_H7}")
+endif()
+if(NOT EXISTS "${FATFS}/ff.c")
+  message(FATAL_ERROR "Initialize the FatFs submodule as shown in README.md")
 endif()
 
 set(LINKER_SCRIPT
@@ -43,6 +48,7 @@ set(FIRMWARE_SOURCES
   src/platform/usb.c
   src/platform/spi.c
   src/platform/i2c.c
+  src/platform/sdmmc.c
   src/board/board_power.c
   src/board/board_spi.c
   src/board/board_i2c.c
@@ -65,6 +71,7 @@ set(FIRMWARE_SOURCES
   src/services/chirp.c
   src/services/display.c
   src/services/motion.c
+  src/services/storage.c
   src/services/usb_charge.c
 )
 
@@ -75,6 +82,9 @@ set(VENDOR_SOURCES
   ${TINYUSB}/src/class/cdc/cdc_device.c
   ${TINYUSB}/src/portable/synopsys/dwc2/dcd_dwc2.c
   ${TINYUSB}/src/portable/synopsys/dwc2/dwc2_common.c
+  ${STM32_HAL_DRIVER}/Src/stm32h7xx_hal_sd.c
+  ${STM32_HAL_DRIVER}/Src/stm32h7xx_ll_sdmmc.c
+  ${FATFS}/ff.c
 )
 
 add_executable(radar_firmware
@@ -95,6 +105,7 @@ target_include_directories(radar_firmware PRIVATE
   ${CMSIS_CORE}/Core/Include
   ${CMSIS_DEVICE}/Include
   ${STM32_HAL_DRIVER_INC}
+  ${FATFS}
 )
 
 set(MCU_FLAGS
