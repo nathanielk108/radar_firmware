@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef enum {
@@ -17,10 +18,14 @@ const char *acquisition_status_name(acquisition_status_t status);
 
 /* Call from the foreground after polling ADC register configuration. */
 acquisition_status_t acquisition_init(void);
+acquisition_status_t acquisition_deinit(void);
+
+/* True while timed or burst capture owns the ADC SPI and CS configuration. */
+bool acquisition_active(void);
 
 /* Continuous timed acquisition. Each channel receives samples_per_block
- * 16-bit codes. The first code pair is from the preceding ADC transaction
- * because every CS pulse returns the previous conversion.
+ * valid 16-bit codes. A priming block is consumed before publishing any
+ * samples, so the old conversion from the previous transaction is hidden.
  * The timer clock is 240 MHz and the SPI5 kernel clock is 120 MHz under
  * the firmware's existing clock configuration. Supported rates must divide
  * 240 MHz exactly; the design target is 400 kSPS.
@@ -31,6 +36,7 @@ acquisition_status_t acquisition_init(void);
   (ACQUISITION_TIMER_HZ / ACQUISITION_SAMPLE_RATE_HZ)
 #define ACQUISITION_CS_OFFSET_TICKS 384U
 #define ACQUISITION_MAX_BLOCK_SAMPLES 128U
+#define ACQUISITION_MAX_BURST_COUNT 16U
 
 typedef struct {
   uint32_t sample_rate_hz;
@@ -73,10 +79,23 @@ acquisition_status_t acquisition_timed_deinit(void);
  */
 acquisition_status_t acquisition_burst_arm(uint16_t samples);
 
+/* Arm a train of bursts. Each external trigger starts one TIM16 pulse train.
+ * stride is the spacing in int16_t samples between aligned blocks. */
+acquisition_status_t acquisition_burst_train_arm(uint16_t samples,
+                                                uint16_t bursts,
+                                                uint16_t *stride);
+
 /* Return aligned signed ADC views after both DMA streams and TIM16 finish.
- * Views are valid until the next burst arm. This call skips the stale word.
+ * For a train, the returned view describes the first block. Views are valid
+ * until the next burst arm. Each block skips its stale word.
  */
 acquisition_status_t acquisition_burst_finish(acquisition_block_t *block);
 
 /* Disarm the board's trigger DMA before aborting a burst. */
 acquisition_status_t acquisition_burst_stop(void);
+
+/* Capture a standalone block at 400 kSPS without triggering an RF sweep.
+ * The returned views are valid until the next burst is armed.
+ */
+acquisition_status_t acquisition_capture_block(uint16_t samples,
+                                              acquisition_block_t *block);

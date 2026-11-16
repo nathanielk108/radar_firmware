@@ -18,6 +18,7 @@
 #define ADC_CS_LOW_TICKS (ACQUISITION_TIMER_TICKS - ACQUISITION_CS_OFFSET_TICKS)
 #define ADC_CS_QUIET_TICKS 360U /* AD4683 tQUIET = 1.5 us */
 #define ADC_STOP_TIMEOUT_MS 2U
+#define ADC_BURST_TIMEOUT_MS 5U
 #define DMA_BUFFER __attribute__((section(".dma_buffer"), aligned(32)))
 
 #define DMA_TX LL_DMA_STREAM_0
@@ -37,10 +38,18 @@ DMA_BUFFER static int16_t timed_rx_b[2][ACQUISITION_MAX_BLOCK_SAMPLES];
 
 /* DMA starts one word before the aligned view to discard the old conversion. */
 #define BURST_ALIGNMENT_WORDS (32U / sizeof(int16_t))
-DMA_BUFFER static int16_t
-    burst_rx_a[BURST_ALIGNMENT_WORDS + ACQUISITION_MAX_BLOCK_SAMPLES];
-DMA_BUFFER static int16_t
-    burst_rx_b[BURST_ALIGNMENT_WORDS + ACQUISITION_MAX_BLOCK_SAMPLES];
+#define BURST_FRAMES_ALIGNED(samples)                                           \
+  (((samples) + BURST_ALIGNMENT_WORDS) & ~(BURST_ALIGNMENT_WORDS - 1U))
+#define BURST_BUFFER_WORDS                                                     \
+  (BURST_ALIGNMENT_WORDS - 1U +                                                  \
+   ACQUISITION_MAX_BURST_COUNT *                                                 \
+       BURST_FRAMES_ALIGNED(ACQUISITION_MAX_BLOCK_SAMPLES))
+_Static_assert(BURST_FRAMES_ALIGNED(ACQUISITION_MAX_BLOCK_SAMPLES) <= 256U,
+               "TIM16 must fit the padded burst length");
+_Static_assert(BURST_BUFFER_WORDS <= UINT16_MAX,
+               "RX DMA must fit the entire padded train");
+DMA_BUFFER static int16_t burst_rx_a[BURST_BUFFER_WORDS];
+DMA_BUFFER static int16_t burst_rx_b[BURST_BUFFER_WORDS];
 
 typedef enum { ACQ_UNINITIALIZED, ACQ_IDLE, ACQ_BUSY, ACQ_FAULT } acq_state_t;
 
@@ -53,6 +62,7 @@ static volatile uint32_t timed_b_completed;
 static volatile uint32_t timed_pair_completed;
 static volatile acquisition_status_t capture_fault;
 static volatile uint32_t timed_released;
+static bool timed_primed;
 static uint32_t timed_delivered;
 static uint16_t timed_block_samples;
 
@@ -253,6 +263,15 @@ acquisition_status_t acquisition_init(void) {
   return ACQUISITION_OK;
 }
 
+acquisition_status_t acquisition_deinit(void) {
+  if (mode != ACQ_MODE_NONE)
+    return ACQUISITION_BUSY;
+  state = ACQ_UNINITIALIZED;
+  return ACQUISITION_OK;
+}
+
+bool acquisition_active(void) { return mode != ACQ_MODE_NONE; }
+
 static void timer_stop_outputs(void) {
   LL_TIM_DisableDMAReq_CC1(TIM16);
   LL_TIM_DisableCounter(TIM16);
@@ -290,6 +309,13 @@ static void timed_rx_completed(uint32_t stream) {
   if (LL_DMA_GetCurrentTargetMem(DMA2, DMA_RX_A) !=
       LL_DMA_GetCurrentTargetMem(DMA2, DMA_RX_B)) {
     capture_abort(ACQUISITION_SPI_ERROR);
+    return;
+  }
+  /* Hide the initial stale conversion without shifting either DMA view or
+   * shortening the first delivered block. */
+  if (!timed_primed) {
+    timed_primed = true;
+    timed_released = 1U;
     return;
   }
   __DMB();
@@ -341,6 +367,7 @@ static void timed_reset_blocks(void) {
   timed_pair_completed = 0U;
   timed_released = 0U;
   timed_delivered = 0U;
+  timed_primed = false;
   capture_fault = ACQUISITION_OK;
 }
 
@@ -456,24 +483,25 @@ acquisition_status_t acquisition_timed_get_block(acquisition_block_t *block) {
   block->a = timed_rx_a[index];
   block->b = timed_rx_b[index];
   block->count = timed_block_samples;
-  block->sequence = ready;
+  block->sequence = ready - 1U;
   timed_delivered = ready;
   return ACQUISITION_OK;
 }
 
 acquisition_status_t acquisition_timed_release_block(uint32_t sequence) {
-  if (mode != ACQ_MODE_TIMED || sequence != timed_delivered ||
-      sequence != timed_released + 1U)
+  uint32_t completed = sequence + 1U; /* Include the discarded priming block. */
+  if (mode != ACQ_MODE_TIMED || completed != timed_delivered ||
+      completed != timed_released + 1U)
     return ACQUISITION_INVALID_ARGUMENT;
   if (capture_fault != ACQUISITION_OK)
     return capture_fault;
   /* The caller has finished reading both channels from this memory target. */
   __DMB();
-  if (!timed_block_valid(sequence)) {
+  if (!timed_block_valid(completed)) {
     capture_abort(ACQUISITION_OVERRUN);
     return ACQUISITION_OVERRUN;
   }
-  timed_released = sequence;
+  timed_released = completed;
   return ACQUISITION_OK;
 }
 
@@ -488,7 +516,7 @@ static acquisition_status_t timed_shutdown(void) {
     state = ACQ_FAULT;
     capture_fault = cleanup;
   } else if (mode == ACQ_MODE_TIMED && capture_fault == ACQUISITION_OK &&
-             timed_pair_completed != timed_released &&
+             timed_pair_completed - timed_released == 1U &&
              !timed_block_valid(timed_pair_completed)) {
     capture_fault = ACQUISITION_OVERRUN;
   }
@@ -503,9 +531,7 @@ acquisition_status_t acquisition_timed_stop(void) {
   return cleanup == ACQUISITION_OK ? capture_fault : cleanup;
 }
 
-acquisition_status_t acquisition_timed_deinit(void) {
-  if (mode != ACQ_MODE_TIMED)
-    return ACQUISITION_NOT_READY;
+static acquisition_status_t restore_polling(void) {
   acquisition_status_t cleanup = timed_shutdown();
   adc_cs_gpio();
   time_delay_us(2U);
@@ -514,12 +540,17 @@ acquisition_status_t acquisition_timed_deinit(void) {
   LL_SPI_SetBaudRatePrescaler(SPI5, (uint32_t)adc_master_spi_config.baud_divider
                                         << SPI_CFG1_MBR_Pos);
   mode = ACQ_MODE_NONE;
-  state = ACQ_IDLE;
   return ACQUISITION_OK;
 }
 
-acquisition_status_t acquisition_burst_arm(uint16_t samples) {
+acquisition_status_t acquisition_timed_deinit(void) {
+  return mode == ACQ_MODE_TIMED ? restore_polling() : ACQUISITION_NOT_READY;
+}
+
+static acquisition_status_t arm_bursts(uint16_t samples, uint16_t bursts,
+                                       uint16_t frames) {
   if (samples == 0U || samples > ACQUISITION_MAX_BLOCK_SAMPLES ||
+      bursts == 0U || bursts > ACQUISITION_MAX_BURST_COUNT ||
       SystemCoreClock != 480000000U)
     return ACQUISITION_INVALID_ARGUMENT;
   if (state == ACQ_BUSY)
@@ -528,20 +559,36 @@ acquisition_status_t acquisition_burst_arm(uint16_t samples) {
     return ACQUISITION_NOT_READY;
 
   /* Frame 0 returns the old sample; frame N reads back conversion N-1. */
-  uint16_t frames = samples + 1U;
+  uint16_t words = frames * bursts;
   configure_capture(ACQUISITION_TIMER_TICKS, frames);
   dma_config_rx(DMA_RX_A, LL_DMAMUX1_REQ_SPI5_RX, SPI5,
-                &burst_rx_a[BURST_ALIGNMENT_WORDS - 1U], NULL, frames);
+                &burst_rx_a[BURST_ALIGNMENT_WORDS - 1U], NULL, words);
   dma_config_rx(DMA_RX_B, LL_DMAMUX1_REQ_SPI4_RX, SPI4,
-                &burst_rx_b[BURST_ALIGNMENT_WORDS - 1U], NULL, frames);
+                &burst_rx_b[BURST_ALIGNMENT_WORDS - 1U], NULL, words);
   timed_block_samples = samples;
   capture_fault = ACQUISITION_OK;
   mode = ACQ_MODE_BURST;
-  if (!arm_capture(frames)) {
-    mode = ACQ_MODE_NONE;
-    return ACQUISITION_TIMEOUT;
+  if (!arm_capture(words)) {
+    acquisition_status_t cleanup = restore_polling();
+    return cleanup == ACQUISITION_OK ? ACQUISITION_TIMEOUT : cleanup;
   }
   return ACQUISITION_OK;
+}
+
+acquisition_status_t acquisition_burst_arm(uint16_t samples) {
+  return arm_bursts(samples, 1U, samples + 1U);
+}
+
+acquisition_status_t acquisition_burst_train_arm(uint16_t samples,
+                                                uint16_t bursts,
+                                                uint16_t *stride) {
+  if (!stride || bursts < 2U)
+    return ACQUISITION_INVALID_ARGUMENT;
+  uint16_t frames = BURST_FRAMES_ALIGNED(samples);
+  acquisition_status_t status = arm_bursts(samples, bursts, frames);
+  if (status == ACQUISITION_OK)
+    *stride = frames;
+  return status;
 }
 
 acquisition_status_t acquisition_burst_finish(acquisition_block_t *block) {
@@ -573,10 +620,28 @@ acquisition_status_t acquisition_burst_finish(acquisition_block_t *block) {
 acquisition_status_t acquisition_burst_stop(void) {
   if (mode != ACQ_MODE_BURST)
     return ACQUISITION_NOT_READY;
-  acquisition_status_t cleanup = timed_shutdown();
-  if (cleanup == ACQUISITION_OK) {
-    mode = ACQ_MODE_NONE;
-    time_delay_us(2U);
-  }
+  acquisition_status_t cleanup = restore_polling();
   return cleanup == ACQUISITION_OK ? capture_fault : cleanup;
+}
+
+acquisition_status_t acquisition_capture_block(uint16_t samples,
+                                              acquisition_block_t *block) {
+  if (!block)
+    return ACQUISITION_INVALID_ARGUMENT;
+  acquisition_status_t status = acquisition_burst_arm(samples);
+  if (status != ACQUISITION_OK)
+    return status;
+
+  uint32_t started = time_ms();
+  LL_TIM_EnableCounter(TIM16);
+  do {
+    status = acquisition_burst_finish(block);
+  } while (status == ACQUISITION_BUSY &&
+           !time_expired(started, ADC_BURST_TIMEOUT_MS));
+  if (status != ACQUISITION_OK && mode == ACQ_MODE_BURST) {
+    acquisition_status_t cleanup = acquisition_burst_stop();
+    if (cleanup != ACQUISITION_OK)
+      return cleanup;
+  }
+  return status == ACQUISITION_BUSY ? ACQUISITION_TIMEOUT : status;
 }

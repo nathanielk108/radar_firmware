@@ -8,13 +8,18 @@
 
 #define DMA_CHIRP_EDGES LL_DMA_STREAM_3
 #define DMA_ADC_START LL_DMA_STREAM_4
+#define DMA_TRAIN_STOP LL_DMA_STREAM_5
 #define DMA_CHIRP_EDGE_ERRORS                                                  \
   (DMA_LISR_TEIF3 | DMA_LISR_DMEIF3 | DMA_LISR_FEIF3)
 #define DMA_ADC_START_ERRORS (DMA_HISR_TEIF4 | DMA_HISR_DMEIF4 | DMA_HISR_FEIF4)
+#define DMA_TRAIN_STOP_ERRORS (DMA_HISR_TEIF5 | DMA_HISR_DMEIF5 | DMA_HISR_FEIF5)
 #define DMA_BUFFER __attribute__((section(".dma_buffer"), aligned(32)))
+#define OPM_GUARD_TICKS 2400U /* 10 us for the last TIM2 CR1 DMA write. */
 
-DMA_BUFFER static uint32_t chirp_edges[2U * BOARD_CHIRP_MAX_STEPS - 1U];
+DMA_BUFFER static uint32_t chirp_edges[2U * (BOARD_CHIRP_MAX_STEPS + 1U)];
 DMA_BUFFER static uint32_t adc_start_cr1;
+DMA_BUFFER static uint32_t train_stop_cr1[BOARD_CHIRP_MAX_COUNT];
+static uint32_t final_edge_count;
 
 void board_timer_adc_init(void) {
   LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM16);
@@ -22,7 +27,8 @@ void board_timer_adc_init(void) {
 
 static bool valid_timing(const board_chirp_timing_t *timing) {
   if (!timing || !timing->step_count ||
-      timing->step_count > BOARD_CHIRP_MAX_STEPS || !timing->adc_start_ticks ||
+      timing->step_count > BOARD_CHIRP_MAX_STEPS || !timing->chirp_count ||
+      timing->chirp_count > BOARD_CHIRP_MAX_COUNT || !timing->adc_start_ticks ||
       timing->adc_start_ticks >= timing->first_step_ticks ||
       !timing->step_high_ticks ||
       timing->step_high_ticks >= timing->step_period_ticks)
@@ -32,17 +38,21 @@ static bool valid_timing(const board_chirp_timing_t *timing) {
       (uint64_t)timing->first_step_ticks +
       (uint64_t)(timing->step_count - 1U) * timing->step_period_ticks +
       timing->step_high_ticks;
-  return last_edge < timing->end_ticks;
+  if (timing->chirp_count == 1U)
+    return !timing->reset_ticks && last_edge < timing->end_ticks;
+  return timing->reset_ticks > last_edge &&
+         (uint64_t)timing->reset_ticks + timing->step_high_ticks +
+                 OPM_GUARD_TICKS < timing->end_ticks;
 }
 
 static void configure_dma(uint32_t stream, uint32_t request,
                           const uint32_t *source, volatile uint32_t *target,
-                          uint32_t count, uint32_t memory_increment) {
+                          uint32_t count, uint32_t options) {
   LL_DMA_ConfigTransfer(DMA2, stream,
-                        LL_DMA_DIRECTION_MEMORY_TO_PERIPH | LL_DMA_MODE_NORMAL |
+                        LL_DMA_DIRECTION_MEMORY_TO_PERIPH |
                             LL_DMA_PRIORITY_HIGH | LL_DMA_PERIPH_NOINCREMENT |
                             LL_DMA_PDATAALIGN_WORD | LL_DMA_MDATAALIGN_WORD |
-                            memory_increment);
+                            options);
   LL_DMA_ConfigAddresses(DMA2, stream, (uint32_t)(uintptr_t)source,
                          (uint32_t)(uintptr_t)target,
                          LL_DMA_DIRECTION_MEMORY_TO_PERIPH);
@@ -64,7 +74,8 @@ bool board_timer_chirp_prepare(const board_chirp_timing_t *timing) {
   /* Reset CH1's toggle state while the pin is held low by GPIO. */
   LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM2);
   LL_APB1_GRP1_ReleaseReset(LL_APB1_GRP1_PERIPH_TIM2);
-  TIM2->CR1 = TIM_CR1_OPM;
+  bool train = timing->chirp_count > 1U;
+  TIM2->CR1 = train ? 0U : TIM_CR1_OPM;
   TIM2->ARR = timing->end_ticks - 1U;
   TIM2->CCR1 = timing->first_step_ticks;
   TIM2->CCR2 = timing->adc_start_ticks;
@@ -73,9 +84,7 @@ bool board_timer_chirp_prepare(const board_chirp_timing_t *timing) {
   LL_TIM_GenerateEvent_UPDATE(TIM2);
   TIM2->SR = 0U;
 
-  /* CH1 toggles at CCR1. Each event loads the next absolute edge, so the
-   * last falling edge leaves TXDATA low until TIM2 stops on its update.
-   */
+  /* CH1 toggles at CCR1 and loads the next edge in the current interval. */
   uint32_t rise = timing->first_step_ticks;
   uint32_t count = 0U;
   for (uint32_t step = 0U; step < timing->step_count; ++step) {
@@ -84,12 +93,32 @@ bool board_timer_chirp_prepare(const board_chirp_timing_t *timing) {
     chirp_edges[count++] = rise + timing->step_high_ticks;
     rise += timing->step_period_ticks;
   }
+  if (train) {
+    chirp_edges[count++] = timing->reset_ticks;
+    chirp_edges[count++] = timing->reset_ticks + timing->step_high_ticks;
+    /* Reset-pulse fall loads the first edge in the next timer interval. */
+    chirp_edges[count++] = timing->first_step_ticks;
+    for (uint16_t i = 0; i < timing->chirp_count; ++i)
+      train_stop_cr1[i] = TIM_CR1_CEN;
+    train_stop_cr1[timing->chirp_count - 1U] |= TIM_CR1_OPM;
+    TIM2->CCR3 = timing->end_ticks - OPM_GUARD_TICKS;
+    LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH3);
+  }
+  final_edge_count = train ? count : 0U;
   adc_start_cr1 = TIM16->CR1 | TIM_CR1_CEN;
   __DMB();
+  uint32_t edge_mode = train ? LL_DMA_MODE_CIRCULAR : LL_DMA_MODE_NORMAL;
   configure_dma(DMA_CHIRP_EDGES, LL_DMAMUX1_REQ_TIM2_CH1, chirp_edges,
-                &TIM2->CCR1, count, LL_DMA_MEMORY_INCREMENT);
+                &TIM2->CCR1, count, edge_mode | LL_DMA_MEMORY_INCREMENT);
   configure_dma(DMA_ADC_START, LL_DMAMUX1_REQ_TIM2_CH2, &adc_start_cr1,
-                &TIM16->CR1, 1U, LL_DMA_MEMORY_NOINCREMENT);
+                &TIM16->CR1, timing->chirp_count,
+                LL_DMA_MODE_NORMAL | LL_DMA_MEMORY_NOINCREMENT);
+  if (train) {
+    configure_dma(DMA_TRAIN_STOP, LL_DMAMUX1_REQ_TIM2_CH3, train_stop_cr1,
+                  &TIM2->CR1, timing->chirp_count,
+                  LL_DMA_MODE_NORMAL | LL_DMA_MEMORY_INCREMENT);
+    LL_TIM_EnableDMAReq_CC3(TIM2);
+  }
 
   board_freq_use_txdata_timer();
   LL_TIM_EnableDMAReq_CC1(TIM2);
@@ -101,30 +130,37 @@ void board_timer_chirp_start(void) { LL_TIM_EnableCounter(TIM2); }
 
 bool board_timer_chirp_complete(void) {
   return !LL_TIM_IsEnabledCounter(TIM2) && LL_TIM_IsActiveFlag_UPDATE(TIM2) &&
-         LL_DMA_GetDataLength(DMA2, DMA_CHIRP_EDGES) == 0U &&
-         LL_DMA_GetDataLength(DMA2, DMA_ADC_START) == 0U;
+         LL_DMA_GetDataLength(DMA2, DMA_CHIRP_EDGES) == final_edge_count &&
+         LL_DMA_GetDataLength(DMA2, DMA_ADC_START) == 0U &&
+         (!final_edge_count || LL_DMA_GetDataLength(DMA2, DMA_TRAIN_STOP) == 0U);
 }
 
 bool board_timer_chirp_has_error(void) {
   return (DMA2->LISR & DMA_CHIRP_EDGE_ERRORS) != 0U ||
-         (DMA2->HISR & DMA_ADC_START_ERRORS) != 0U;
+         (DMA2->HISR & (DMA_ADC_START_ERRORS | DMA_TRAIN_STOP_ERRORS)) != 0U;
 }
 
 bool board_timer_chirp_stop(void) {
   LL_TIM_DisableDMAReq_CC1(TIM2);
   LL_TIM_DisableDMAReq_CC2(TIM2);
+  LL_TIM_DisableDMAReq_CC3(TIM2);
   LL_TIM_DisableCounter(TIM2);
   board_freq_hold_txdata_low();
   LL_DMA_DisableStream(DMA2, DMA_CHIRP_EDGES);
   LL_DMA_DisableStream(DMA2, DMA_ADC_START);
+  LL_DMA_DisableStream(DMA2, DMA_TRAIN_STOP);
 
   uint32_t started = time_ms();
   while (LL_DMA_IsEnabledStream(DMA2, DMA_CHIRP_EDGES) ||
-         LL_DMA_IsEnabledStream(DMA2, DMA_ADC_START)) {
+         LL_DMA_IsEnabledStream(DMA2, DMA_ADC_START) ||
+         LL_DMA_IsEnabledStream(DMA2, DMA_TRAIN_STOP)) {
     if (time_expired(started, 2U))
       return false;
   }
+  /* An in-flight CH3 transfer may have written CEN during shutdown. */
+  LL_TIM_DisableCounter(TIM2);
   DMA2->LIFCR = DMA_CHIRP_EDGE_ERRORS | DMA_LISR_TCIF3 | DMA_LISR_HTIF3;
-  DMA2->HIFCR = DMA_ADC_START_ERRORS | DMA_HISR_TCIF4 | DMA_HISR_HTIF4;
+  DMA2->HIFCR = DMA_ADC_START_ERRORS | DMA_HISR_TCIF4 | DMA_HISR_HTIF4 |
+               DMA_TRAIN_STOP_ERRORS | DMA_HISR_TCIF5 | DMA_HISR_HTIF5;
   return true;
 }
