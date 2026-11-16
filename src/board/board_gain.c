@@ -26,6 +26,8 @@ void board_gain_init(void) {
   LL_DAC_Enable(DAC1, LL_DAC_CHANNEL_1);
 }
 
+void board_gain_disable(void) { LL_DAC_Disable(DAC1, LL_DAC_CHANNEL_1); }
+
 bool board_gain_set_mv(uint16_t millivolts) {
   if (millivolts < BOARD_GAIN_MIN_MV || millivolts > BOARD_GAIN_MAX_MV)
     return false;

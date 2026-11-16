@@ -1,24 +1,68 @@
 # RADAR firmware
 
-Bare-metal STM32H743 firmware using CMSIS, STM32CubeH7 LL, and TinyUSB CDC.
+Bare-metal STM32H743 firmware using CMSIS, CMSIS-DSP, STM32CubeH7, TinyUSB CDC,
+and FatFs.
 
 ## Startup
 
 1. Inhibit charging, hold the display in reset with its backlight off, and
    disable the RF rails while the MCU clock, SysTick, MPU and caches start.
-2. Configure the BQ25883, ISM330IS and BMI323.
-3. Enable the RF board's 5 V rail, then its 15 V rail. After the rails settle,
-   set the shared VGA gain DAC to a nominal 2.5 V and put the ADF4158 PLL
-   in software power-down.
-4. Configure the AD4683 for two-wire output and its external 3.3 V reference.
-   Initialize the ADC timer and DMA.
-5. Start USB CDC when the charger reports qualified VBUS. Open the native USB
+2. Configure the BQ25883, ISM330IS and BMI323. Mount a preformatted microSD card
+   if present at boot.
+3. Try the RF board's 5 V rail, then its 15 V rail. After the rails settle,
+   put the ADF4158 in software power-down. Configure the AD4683 for two-wire
+   output with its external 3.3 V reference, then initialize its timer and DMA.
+   Set the VGA DAC to 2.5 V on success. If ADC initialization fails, turn off
+   both RF rails and continue in digital-only mode.
+4. Start USB CDC when the charger reports qualified VBUS. Open the native USB
    port to read the queued boot status messages. The PCB's PA9 VBUS divider
    produces about 1.6 V at 5 V input, so firmware uses the BQ25883 power-good
    signal on PG1 for USB attach and detach.
 
-The foreground loop services SWO, USB and charging. The display and SDMMC
-application paths are still pending.
+`firmware_init()` and `firmware_poll()` handle board startup and foreground
+services. Application code can use the drivers through the public `services`
+headers. The LCD boots with reset asserted and its backlight off. Explicitly
+enable it only when a panel is fitted. The two IMU samples use sensor-native
+axes pending physical verification of their orientation on the assembled PCB.
+
+## Console and SD recording
+
+Open the digital board's native USB CDC port. Send `help` followed by Enter.
+The `c` single-chirp shortcut works without Enter.
+
+| Command | Behavior |
+| --- | --- |
+| `status`, `power`, `imu [1\|2]` | Read subsystem, USB-C/charger, and motion diagnostics. |
+| `rf on`, `rf off`, `g [mV]` | Probe or disable the RF board and configure IF gain. |
+| `c` | Send one chirp as USB CSV. Also queue the raw capture if SD is mounted. |
+| `save [chirps [interval_us]]` | Save one complete capture to SD. Train limits are 2–16 chirps at intervals of 500–10000 µs. The default interval is 1000 µs. |
+| `sd mount`, `sd test`, `sd eject` | Mount an existing FAT volume, write and read back a new scratch file, or flush and unmount. |
+| `test dsp`, `test adc`, `test stream` | Check the CMSIS-DSP real FFT, a finite ADC-only DMA capture, or one second of continuous ADC DMA with USB and charger tasks active. |
+| `test lcd`, `lcd off` | Draw RGB565 test bars on an attached panel or disable it. |
+| `echo <text>` | Check the CDC receive and transmit paths. |
+
+`test fault` deliberately triggers a UsageFault in Debug builds. Run it with a
+debugger attached. `sd test` creates an `SDTESTnn.DAT` scratch file without
+overwriting existing files. Use a preformatted FAT16/FAT32 card. If the card
+was inserted after boot, run `sd mount`.
+
+Diagnostics append to `DIAG.LOG`. Successful captures are saved as separate
+`Cnnnnnnn.BIN` files with both channels, every retained sample, gain, programmed
+sweep, and timing metadata. The foreground copies completed DMA views into a
+four-capture queue. Run `recording_task()` after time-critical work. It writes
+only while capture is idle. SDMMC1 uses internal DMA with a private cache-managed
+AXI SRAM buffer. Card and FatFs waits still occupy the foreground during each
+file write. `status` reports pending captures, losses, write errors, and the
+last completed filename. Use `sd eject` before removing the card.
+
+Convert the complete file on a host, or extract one chirp for the existing
+range and spectrum tools.
+
+```sh
+python scripts/read_radar_capture.py C0000000.BIN --output train.csv
+python scripts/read_radar_capture.py C0000000.BIN --chirp 0 --output chirp.csv
+python scripts/plot_chirp_spectrum.py chirp.csv
+```
 
 ## USB-C charging
 
@@ -101,17 +145,26 @@ bandwidth before interpreting a target measurement.
 
 ## Application buffers
 
-`chirp_capture_one()` returns two 32-byte-aligned, read-only `int16_t` arrays
-directly from non-cacheable D2 SRAM. The arrays hold one channel each, with
-matching sample indices, and remain valid until the next burst. Application
-code can consume the raw Q15 codes or convert straight into CMSIS-DSP working
-buffers. USB formatting runs after the timers and DMA stop.
+Use `chirp_capture_start()` or `chirp_capture_train_start()` followed by
+`chirp_capture_poll()`. The PLL settle wait leaves foreground services running.
+The timers and DMA pace the train. Each train interval has 120 sweep edges,
+64 ADC frames, and a reset edge after the ADC window. Verify the actual RF
+tracking, chirp-to-chirp phase repeatability, and reset settling on the assembled
+RF board before using the train for coherent processing.
 
-The continuous path still uses paired ping-pong DMA with one interrupt per
-completed channel block. Release each view with
-`acquisition_timed_release_block()` before DMA reuses it. The first returned
-word of a newly started continuous run still belongs to the preceding ADC
-transaction.
+A completed capture exposes two 32-byte-aligned, read-only `int16_t` arrays
+directly from non-cacheable D2 SRAM. Each chirp has `samples.count` valid
+samples per channel and starts at `chirp_index * sample_stride`. The views
+remain valid until the next burst is armed. Use them directly as raw Q15 data,
+or convert into cacheable CMSIS-DSP scratch buffers when a kernel modifies its
+input. Pass the capture to `recording_capture()` before reusing its views.
+
+Continuous acquisition uses paired ping-pong DMA and discards the initial
+priming block. Release each view with `acquisition_timed_release_block()`
+before the next block completes. A 128-sample block at 400 kSPS gives a 320 µs
+budget. Treat overruns as discontinuities. The SD recorder is for completed
+bursts and trains. Indefinite raw logging during continuous capture needs a
+separate throughput and latency qualification.
 
 ## Build
 
@@ -128,4 +181,5 @@ Top-level Git status and diff report changes to vendor commit pins. To see local
 edits in a vendor checkout, run `git -C vendor/tinyusb status` for that checkout.
 
 The ELF, BIN, HEX and map files are under `build/Debug`. The preset uses USB for
-boot logs. Use `-DPRINTF_OUT=BOTH` when configuring to send them to SWO as well.
+boot logs and buffers diagnostics for SD. Use `-DPRINTF_OUT=BOTH` when
+configuring to send logs to SWO as well.

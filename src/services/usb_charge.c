@@ -22,6 +22,8 @@ static uint32_t candidate_since;
 static uint16_t candidate_ma;
 static uint16_t source_ma;
 static uint16_t input_ma = USB_CONFIGURED_CURRENT_MA;
+static uint16_t measured_cc1_mv;
+static uint16_t measured_cc2_mv;
 static bool charging_enabled;
 
 /* Use the valid vRd bands in ST AN5225, Table 7. A regular source has
@@ -88,6 +90,8 @@ void usb_charge_task(void) {
   uint16_t cc1_mv = 0U;
   uint16_t cc2_mv = 0U;
   bool sampled = present && board_usb_cc_read_mv(&cc1_mv, &cc2_mv);
+  measured_cc1_mv = sampled ? cc1_mv : 0U;
+  measured_cc2_mv = sampled ? cc2_mv : 0U;
   uint16_t observed_ma = sampled ? advertised_current(cc1_mv, cc2_mv) : 0U;
   if (present && !vbus_present) {
     if (sampled)
@@ -127,4 +131,13 @@ void usb_charge_task(void) {
   charging_enabled = enable;
   LOG_INFO("BQ25883: input limit %u mA, charging %s", (unsigned)input_ma,
            enable ? "enabled" : "inhibited");
+}
+
+usb_charge_status_t usb_charge_status(void) {
+  return (usb_charge_status_t){.ready = charger_ready && monitor_ready,
+                               .update_failed = write_failed,
+                               .cc1_mv = measured_cc1_mv,
+                               .cc2_mv = measured_cc2_mv,
+                               .advertised_ma = source_ma,
+                               .input_limit_ma = input_ma};
 }

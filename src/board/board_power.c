@@ -35,6 +35,11 @@ void board_rf_power_on(void) {
   time_delay_ms(200U);
 }
 
+void board_rf_power_off(void) {
+  board_rf_15v_enable(false);
+  board_rf_5v_enable(false);
+}
+
 void board_rf_5v_enable(bool enable) {
   if (enable)
     LL_GPIO_SetOutputPin(RF_5V_EN_PORT, 1UL << RF_5V_EN_PIN);

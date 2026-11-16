@@ -9,6 +9,7 @@
 
 /* Initialize the common VGA gain output after the RF rails are up. */
 void board_gain_init(void);
+void board_gain_disable(void);
 
 /* Set nominal output voltage between captures. */
 bool board_gain_set_mv(uint16_t millivolts);

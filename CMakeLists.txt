@@ -68,6 +68,8 @@ set(FIRMWARE_SOURCES
   src/drivers/bmi323.c
   src/drivers/st7789.c
   src/system/log.c
+  src/system/firmware.c
+  src/system/console.c
   src/services/acquisition.c
   src/services/chirp.c
   src/services/display.c
@@ -153,6 +155,7 @@ target_compile_definitions(radar_firmware PRIVATE
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_compile_definitions(radar_firmware PRIVATE FIRMWARE_DEBUG=1)
   target_compile_options(radar_firmware PRIVATE
     -Og
     -g3

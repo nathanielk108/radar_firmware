@@ -4,6 +4,7 @@
 
 void board_power_init(void);
 void board_rf_power_on(void);
+void board_rf_power_off(void);
 
 void board_rf_5v_enable(bool enable);
 void board_rf_15v_enable(bool enable);
