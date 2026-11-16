@@ -42,7 +42,7 @@ void board_freq_init(void) {
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_MEDIUM, 0U, false);
 
-  board_gpio_pin(FREQ_TXDATA_PORT, FREQ_TXDATA_PIN, LL_GPIO_MODE_ALTERNATE,
+  board_gpio_pin(FREQ_TXDATA_PORT, FREQ_TXDATA_PIN, LL_GPIO_MODE_OUTPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
-                 LL_GPIO_SPEED_FREQ_VERY_HIGH, FREQ_TXDATA_AF, false);
+                 LL_GPIO_SPEED_FREQ_LOW, 0U, false);
 }

@@ -25,6 +25,8 @@ typedef struct {
   uint32_t hfsr;
   uint32_t mmfar;
   uint32_t bfar;
+  uint32_t type;
+  uint32_t frame_valid;
 } fault_record_t;
 
 volatile fault_record_t fault_record;
@@ -37,6 +39,25 @@ static void print_reg(const char *name, uint32_t value) {
 }
 
 __attribute__((noreturn)) void fault_handler_c(uint32_t *stack, uint32_t type) {
+  fault_record.cfsr = SCB->CFSR;
+  fault_record.hfsr = SCB->HFSR;
+  fault_record.mmfar = SCB->MMFAR;
+  fault_record.bfar = SCB->BFAR;
+  fault_record.type = type;
+  fault_record.frame_valid =
+      !(fault_record.cfsr & (SCB_CFSR_MSTKERR_Msk | SCB_CFSR_STKERR_Msk));
+
+  if (fault_record.frame_valid) {
+    fault_record.r0 = stack[0];
+    fault_record.r1 = stack[1];
+    fault_record.r2 = stack[2];
+    fault_record.r3 = stack[3];
+    fault_record.r12 = stack[4];
+    fault_record.lr = stack[5];
+    fault_record.pc = stack[6];
+    fault_record.xpsr = stack[7];
+  }
+
   debug_swo_write("\r\n*** FAULT ***\r\n");
 
   switch ((fault_type_t)type) {
@@ -54,49 +75,24 @@ __attribute__((noreturn)) void fault_handler_c(uint32_t *stack, uint32_t type) {
     break;
   }
 
-  /*
-   * Cortex-M exception stack frame:
-   *
-   * stack[0] = R0
-   * stack[1] = R1
-   * stack[2] = R2
-   * stack[3] = R3
-   * stack[4] = R12
-   * stack[5] = LR
-   * stack[6] = PC
-   * stack[7] = xPSR
-   */
-
-  fault_record.r0 = stack[0];
-  fault_record.r1 = stack[1];
-  fault_record.r2 = stack[2];
-  fault_record.r3 = stack[3];
-  fault_record.r12 = stack[4];
-  fault_record.lr = stack[5];
-  fault_record.pc = stack[6];
-  fault_record.xpsr = stack[7];
-
-  fault_record.cfsr = SCB->CFSR;
-  fault_record.hfsr = SCB->HFSR;
-  fault_record.mmfar = SCB->MMFAR;
-  fault_record.bfar = SCB->BFAR;
-
-  print_reg("R0  ", stack[0]);
-  print_reg("R1  ", stack[1]);
-  print_reg("R2  ", stack[2]);
-  print_reg("R3  ", stack[3]);
-  print_reg("R12 ", stack[4]);
-  print_reg("LR  ", stack[5]);
-  print_reg("PC  ", stack[6]);
-  print_reg("xPSR", stack[7]);
+  if (fault_record.frame_valid) {
+    print_reg("R0  ", fault_record.r0);
+    print_reg("R1  ", fault_record.r1);
+    print_reg("R2  ", fault_record.r2);
+    print_reg("R3  ", fault_record.r3);
+    print_reg("R12 ", fault_record.r12);
+    print_reg("LR  ", fault_record.lr);
+    print_reg("PC  ", fault_record.pc);
+    print_reg("xPSR", fault_record.xpsr);
+  }
 
   debug_swo_write("\r\nSCB:\r\n");
 
-  print_reg("CFSR ", SCB->CFSR);
-  print_reg("HFSR ", SCB->HFSR);
+  print_reg("CFSR ", fault_record.cfsr);
+  print_reg("HFSR ", fault_record.hfsr);
   print_reg("DFSR ", SCB->DFSR);
-  print_reg("MMFAR", SCB->MMFAR);
-  print_reg("BFAR ", SCB->BFAR);
+  print_reg("MMFAR", fault_record.mmfar);
+  print_reg("BFAR ", fault_record.bfar);
   print_reg("AFSR ", SCB->AFSR);
   print_reg("SHCSR", SCB->SHCSR);
 

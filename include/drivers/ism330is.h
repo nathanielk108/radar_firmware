@@ -1,7 +1,5 @@
 #pragma once
-#include <stddef.h>
 
-#include "platform/spi.h"
 #include <stdint.h>
 
 typedef enum {
@@ -21,8 +19,5 @@ const char *ism330is_status_name(ism330is_status_t status);
 
 /* Requires board_spi_imu1_init() and spi_init(&imu1_spi_config). */
 ism330is_status_t ism330is_read_id(uint8_t *id);
-
-/* Returns the caller-owned buffer; do not call from an ISR. */
-const char *ism330is_diagnostic(char *buf, size_t size);
 
 ism330is_status_t ism330is_init(void);

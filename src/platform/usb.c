@@ -11,51 +11,46 @@
 static char tx_queue[USB_QUEUE_CAPACITY];
 static uint16_t tx_head;
 static uint16_t tx_tail;
-static uint32_t dropped;
-
-/* SysTick is initialized before usb_init(). */
-static bool wait_set(volatile uint32_t *reg, uint32_t mask,
-                     uint32_t timeout_ms) {
-  const uint32_t start = time_ms();
-  while ((*reg & mask) != mask) {
-    if (time_expired(start, timeout_ms))
-      return false;
-  }
-  return true;
-}
 
 bool usb_init(void) {
   PWR->CR3 |= PWR_CR3_USB33DEN;
-  if (!wait_set(&PWR->CR3, PWR_CR3_USB33RDY, 100U))
-    return false;
+  uint32_t start = time_ms();
+  while (!(PWR->CR3 & PWR_CR3_USB33RDY)) {
+    if (time_expired(start, 100U))
+      return false;
+  }
 
-  /* PLL1Q = 48 MHz, selected as OTG FS kernel clock. */
-  RCC->PLLCFGR |= RCC_PLLCFGR_DIVQ1EN;
+  /* clock_init() enables the 48 MHz PLL1Q output. */
   MODIFY_REG(RCC->D2CCIP2R, RCC_D2CCIP2R_USBSEL_Msk, RCC_D2CCIP2R_USBSEL_0);
   board_usb_init();
   RCC->AHB1ENR |= RCC_AHB1ENR_USB2OTGFSEN;
   (void)RCC->AHB1ENR;
   NVIC_SetPriority(OTG_FS_IRQn, 5U);
-  NVIC_EnableIRQ(OTG_FS_IRQn);
+  NVIC_ClearPendingIRQ(OTG_FS_IRQn);
 
-  tusb_rhport_init_t init = {.role = TUSB_ROLE_DEVICE,
-                             .speed = TUSB_SPEED_FULL};
+  const tusb_rhport_init_t init = {
+      .role = TUSB_ROLE_DEVICE,
+      .speed = TUSB_SPEED_FULL,
+  };
   return tusb_init(0U, &init);
 }
 
 void OTG_FS_IRQHandler(void) { tusb_int_handler(0U, true); }
 
+uint32_t tusb_time_millis_api(void) { return time_ms(); }
+
+void tud_umount_cb(void) { tx_head = tx_tail = 0U; }
+
 bool usb_console_write_bytes(const char *data, size_t length) {
-  if (!data || !tud_cdc_connected())
+  if (!data)
     return false;
   if (length == 0U)
     return true;
+  /* Buffer early boot logs until the host opens CDC. */
   size_t used =
       (size_t)((tx_head + USB_QUEUE_CAPACITY - tx_tail) % USB_QUEUE_CAPACITY);
-  if (length > USB_QUEUE_CAPACITY - 1U - used) {
-    dropped += (uint32_t)length;
+  if (length > USB_QUEUE_CAPACITY - 1U - used)
     return false;
-  }
   size_t first = USB_QUEUE_CAPACITY - tx_head;
   if (first > length)
     first = length;
@@ -66,19 +61,10 @@ bool usb_console_write_bytes(const char *data, size_t length) {
   return true;
 }
 
-void usb_console_putchar(char c) { (void)usb_console_write_bytes(&c, 1U); }
-
-void usb_console_write(const char *text) {
-  if (text)
-    (void)usb_console_write_bytes(text, strlen(text));
-}
-
 void usb_task(void) {
   tud_task();
-  if (!tud_cdc_connected()) {
-    tx_head = tx_tail = 0U;
+  if (!tud_cdc_connected())
     return;
-  }
   /* Copy contiguous chunks into TinyUSB's existing transmit FIFO. */
   size_t budget = 256U;
   while (tx_head != tx_tail && budget) {
@@ -107,4 +93,3 @@ uint32_t usb_console_read(char *buffer, uint32_t len) {
 }
 
 bool usb_console_connected(void) { return tud_cdc_connected(); }
-uint32_t usb_console_dropped(void) { return dropped; }

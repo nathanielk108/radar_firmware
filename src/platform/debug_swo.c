@@ -1,18 +1,22 @@
 #include "platform/debug_swo.h"
-#include "stm32h7xx.h"
+#include "board/board_gpio.h"
+#include "board/board_pins.h"
+
 #include <string.h>
 
 #define SWO_QUEUE_CAPACITY 1024U
 #define SWO_POLL_BUDGET 128U
 #define ITM_UNLOCK 0xC5ACCE55U
 
-/* Single-producer foreground queue; never called from an ISR. */
+/* Foreground queue. A fatal fault may also write before halting. */
 static char queue[SWO_QUEUE_CAPACITY];
 static uint16_t head;
 static uint16_t tail;
-static uint32_t dropped;
 
 void debug_swo_init(void) {
+  board_gpio_pin(DEBUG_SWO_PORT, DEBUG_SWO_PIN, LL_GPIO_MODE_ALTERNATE,
+                 LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
+                 LL_GPIO_SPEED_FREQ_HIGH, DEBUG_SWO_AF, false);
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   ITM->LAR = ITM_UNLOCK;
   ITM->TCR |= ITM_TCR_ITMENA_Msk | ITM_TCR_DWTENA_Msk;
@@ -24,10 +28,8 @@ bool debug_swo_write_bytes(const char *data, size_t length) {
     return length == 0U;
   size_t used =
       (size_t)((head + SWO_QUEUE_CAPACITY - tail) % SWO_QUEUE_CAPACITY);
-  if (length > SWO_QUEUE_CAPACITY - 1U - used) {
-    dropped += (uint32_t)length;
+  if (length > SWO_QUEUE_CAPACITY - 1U - used)
     return false; /* Never emit a partial log message. */
-  }
   size_t first = SWO_QUEUE_CAPACITY - head;
   if (first > length)
     first = length;
@@ -37,8 +39,6 @@ bool debug_swo_write_bytes(const char *data, size_t length) {
   head = (uint16_t)((head + length) % SWO_QUEUE_CAPACITY);
   return true;
 }
-
-bool debug_swo_putc(char c) { return debug_swo_write_bytes(&c, 1U); }
 
 void debug_swo_poll(void) {
   if (!(CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) ||
@@ -55,8 +55,6 @@ void debug_swo_flush_bounded(uint32_t iterations) {
   while (head != tail && iterations-- != 0U)
     debug_swo_poll();
 }
-
-uint32_t debug_swo_dropped(void) { return dropped; }
 
 void debug_swo_write(const char *str) {
   if (str)

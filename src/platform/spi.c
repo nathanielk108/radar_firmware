@@ -5,7 +5,8 @@
 #include "stm32h7xx_ll_gpio.h"
 #include "stm32h7xx_ll_spi.h"
 
-/* Polling SPI transactions. AD4683 DMA capture lives in services/acquisition.c. */
+/* Polling SPI transactions. AD4683 DMA capture lives in services/acquisition.c.
+ */
 static bool enable_clock(SPI_TypeDef *spi) {
   if (spi == SPI1)
     LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SPI1);
@@ -25,28 +26,30 @@ static bool enable_clock(SPI_TypeDef *spi) {
 }
 
 static bool valid_config(const spi_config_t *cfg) {
-  return cfg && cfg->spi && cfg->data_size >= 4U && cfg->data_size <= 32U &&
-         cfg->role <= SPI_ROLE_MASTER &&
-         cfg->communication <= SPI_COMM_HALF_DUPLEX &&
-         cfg->mode <= SPI_MODE_3 && cfg->bit_order <= SPI_LSB_FIRST &&
-         cfg->baud_divider <= SPI_DIV_256;
+  return cfg && IS_SPI_ALL_INSTANCE(cfg->spi) && cfg->data_size >= 4U &&
+         cfg->data_size <= (IS_SPI_HIGHEND_INSTANCE(cfg->spi) ? 32U : 16U) &&
+         (unsigned int)cfg->role <= SPI_ROLE_MASTER &&
+         (unsigned int)cfg->communication <= SPI_COMM_HALF_DUPLEX &&
+         (unsigned int)cfg->mode <= SPI_MODE_3 &&
+         (unsigned int)cfg->bit_order <= SPI_LSB_FIRST &&
+         (unsigned int)cfg->baud_divider <= SPI_DIV_256;
 }
 
 static void write_frame(SPI_TypeDef *spi, uint32_t value, uint8_t bits) {
   if (bits <= 8U)
-    *(volatile uint8_t *)&spi->TXDR = (uint8_t)value;
+    LL_SPI_TransmitData8(spi, (uint8_t)value);
   else if (bits <= 16U)
-    *(volatile uint16_t *)&spi->TXDR = (uint16_t)value;
+    LL_SPI_TransmitData16(spi, (uint16_t)value);
   else
-    spi->TXDR = value;
+    LL_SPI_TransmitData32(spi, value);
 }
 
 static uint32_t read_frame(SPI_TypeDef *spi, uint8_t bits) {
   if (bits <= 8U)
-    return *(volatile uint8_t *)&spi->RXDR;
+    return LL_SPI_ReceiveData8(spi);
   if (bits <= 16U)
-    return *(volatile uint16_t *)&spi->RXDR;
-  return spi->RXDR;
+    return LL_SPI_ReceiveData16(spi);
+  return LL_SPI_ReceiveData32(spi);
 }
 
 static uint32_t tx_frame(const void *buffer, uint16_t index, uint8_t bits) {
@@ -76,18 +79,15 @@ static void clear_flags(SPI_TypeDef *spi) {
               SPI_IFCR_SUSPC;
 }
 
-/* One failure does not leave SPE permanently cleared for the next transaction.
- */
 static void abort_transfer(SPI_TypeDef *spi) {
   if ((spi->CR1 & SPI_CR1_CSTART) != 0U) {
     LL_SPI_SuspendMasterTransfer(spi);
     uint32_t start = time_ms();
-    while (((spi->SR & (SPI_SR_SUSP | SPI_SR_EOT)) == 0U) &&
-           !time_expired(start, 2U)) {
+    while (((spi->CR1 & SPI_CR1_CSTART) != 0U) && !time_expired(start, 2U)) {
     }
   }
-  LL_SPI_Disable(spi);
   clear_flags(spi);
+  LL_SPI_Disable(spi);
 }
 
 spi_status_t spi_init(const spi_config_t *cfg) {
@@ -98,7 +98,8 @@ spi_status_t spi_init(const spi_config_t *cfg) {
   LL_SPI_Disable(spi);
   spi->CR1 = 0U;
   spi->CR2 = 0U;
-  spi->CFG1 = 0U;
+  /* ES0392: keep the default CRC field even when CRC is disabled. */
+  spi->CFG1 = LL_SPI_CRC_8BIT;
   spi->CFG2 = 0U;
 
   LL_SPI_SetDataWidth(spi, (uint32_t)cfg->data_size - 1U);
@@ -123,7 +124,8 @@ spi_status_t spi_init(const spi_config_t *cfg) {
   clear_flags(spi);
   if (cfg->io_swap)
     LL_SPI_EnableIOSwap(spi);
-  LL_SPI_Enable(spi);
+  if (cfg->role == SPI_ROLE_MASTER)
+    LL_SPI_EnableGPIOControl(spi);
   return SPI_STATUS_OK;
 }
 
@@ -139,13 +141,13 @@ spi_status_t spi_transfer(const spi_config_t *cfg, const void *tx, void *rx,
   uint16_t written = 0U;
   uint16_t received = 0U;
 
-  /* Reset and configure transaction while SPI is disabled. */
+  /* Use TXC with TSIZE=0 to wait for the complete last pulse (ES0392). */
   LL_SPI_Disable(spi);
-  LL_SPI_SetTransferSize(spi, count);
+  LL_SPI_SetTransferSize(spi, 0U);
   clear_flags(spi);
   LL_SPI_Enable(spi);
 
-  /* The first frame must be in TXDR BEFORE CSTART. */
+  /* Prime the first frame before starting the clock. */
   while ((spi->SR & SPI_SR_TXP) == 0U) {
     if (time_expired(start, timeout_ms)) {
       abort_transfer(spi);
@@ -173,7 +175,7 @@ spi_status_t spi_transfer(const spi_config_t *cfg, const void *tx, void *rx,
     if ((sr & SPI_SR_TXP) && written < count) {
       write_frame(spi, tx_frame(tx, written++, cfg->data_size), cfg->data_size);
     }
-    if (received == count && (spi->SR & SPI_SR_EOT))
+    if (received == count && LL_SPI_IsActiveFlag_TXC(spi))
       break;
     if (time_expired(start, timeout_ms)) {
       abort_transfer(spi);
@@ -183,7 +185,6 @@ spi_status_t spi_transfer(const spi_config_t *cfg, const void *tx, void *rx,
 
   LL_SPI_Disable(spi);
   clear_flags(spi);
-  LL_SPI_Enable(spi);
   return SPI_STATUS_OK;
 }
 
@@ -194,8 +195,8 @@ spi_status_t spi_transfer_pair(const spi_config_t *master,
   if (!valid_config(master) || !valid_config(slave) || !a || !b || !cs_port ||
       cs_pin > 15U || !timeout_ms || master->spi != SPI5 ||
       slave->spi != SPI4 || master->role != SPI_ROLE_MASTER ||
-      slave->role != SPI_ROLE_SLAVE ||
-      master->communication != SPI_COMM_FULL_DUPLEX ||
+      slave->role != SPI_ROLE_SLAVE || !master->software_nss ||
+      slave->software_nss || master->communication != SPI_COMM_FULL_DUPLEX ||
       slave->communication != SPI_COMM_RX_ONLY || master->data_size != 16U ||
       slave->data_size != 16U || master->mode != slave->mode ||
       master->bit_order != slave->bit_order)
@@ -208,8 +209,8 @@ spi_status_t spi_transfer_pair(const spi_config_t *master,
 
   LL_SPI_Disable(m);
   LL_SPI_Disable(s);
-  LL_SPI_SetTransferSize(s, 1U);
-  LL_SPI_SetTransferSize(m, 1U);
+  LL_SPI_SetTransferSize(s, 0U);
+  LL_SPI_SetTransferSize(m, 0U);
   clear_flags(s);
   clear_flags(m);
 
@@ -226,10 +227,13 @@ spi_status_t spi_transfer_pair(const spi_config_t *master,
   }
   write_frame(m, tx, 16U);
   LL_GPIO_ResetOutputPin(cs_port, cs);
+  time_delay_us(1U);
   LL_SPI_StartMasterTransfer(m);
 
   bool got_a = false;
   bool got_b = false;
+  uint16_t result_a = 0U;
+  uint16_t result_b = 0U;
   spi_status_t result = SPI_STATUS_OK;
   for (;;) {
     uint32_t mr = m->SR;
@@ -243,15 +247,14 @@ spi_status_t spi_transfer_pair(const spi_config_t *master,
       break;
     }
     if (!got_a && (mr & SPI_SR_RXP)) {
-      *a = (uint16_t)read_frame(m, 16U);
+      result_a = (uint16_t)read_frame(m, 16U);
       got_a = true;
     }
     if (!got_b && (sr & SPI_SR_RXP)) {
-      *b = (uint16_t)read_frame(s, 16U);
+      result_b = (uint16_t)read_frame(s, 16U);
       got_b = true;
     }
-    /* Hardware-NSS slave EOT is not a reliable single-frame completion flag. */
-    if (got_a && got_b && (m->SR & SPI_SR_EOT))
+    if (got_a && got_b && LL_SPI_IsActiveFlag_TXC(m))
       break;
     if (time_expired(start, timeout_ms)) {
       result = SPI_STATUS_TIMEOUT;
@@ -259,14 +262,16 @@ spi_status_t spi_transfer_pair(const spi_config_t *master,
     }
   }
 
-  if (result != SPI_STATUS_OK)
+  if (result == SPI_STATUS_OK) {
+    *a = result_a;
+    *b = result_b;
+  } else {
     abort_transfer(m);
+  }
   LL_GPIO_SetOutputPin(cs_port, cs);
   LL_SPI_Disable(m);
   LL_SPI_Disable(s);
   clear_flags(m);
   clear_flags(s);
-  LL_SPI_Enable(m);
-  LL_SPI_Enable(s);
   return result;
 }

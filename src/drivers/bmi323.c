@@ -1,9 +1,14 @@
 #include "drivers/bmi323.h"
-#include <stdio.h>
-
 #include "board/board_pins.h"
 #include "board/board_spi.h"
+#include "platform/time.h"
 #include "stm32h7xx_ll_gpio.h"
+
+#define BMI323_ACC_CONF 0x20U
+#define BMI323_GYR_CONF 0x21U
+#define BMI323_NORMAL_MODE (4U << 12)
+#define BMI323_RANGE_250_DPS (1U << 4)
+#define BMI323_ODR_800_HZ 0x0BU
 
 static bmi323_status_t map_spi_status(spi_status_t status) {
   switch (status) {
@@ -43,64 +48,50 @@ const char *bmi323_status_name(bmi323_status_t status) {
   }
 }
 
-static bool spi_selected;
-
-static bmi323_status_t bmi323_read_reg(uint8_t reg, uint16_t *value) {
-  if (value == NULL) {
-    return BMI323_ERROR_INVALID_ARGUMENT;
-  }
-
-  /* Address, dummy byte, little-endian 16-bit register value. */
-  const uint8_t tx[4] = {(uint8_t)(0x80U | reg), 0U, 0U, 0U};
-  uint8_t rx[4] = {0U, 0U, 0U, 0U};
-
+static bmi323_status_t transfer(const uint8_t *tx, uint8_t *rx,
+                                uint16_t count) {
   LL_GPIO_ResetOutputPin(IMU2_CS_PORT, 1UL << IMU2_CS_PIN);
-  spi_status_t transfer = spi_transfer(&imu2_spi_config, tx, rx, 4U, 20U);
+  spi_status_t status = spi_transfer(&imu2_spi_config, tx, rx, count, 20U);
   LL_GPIO_SetOutputPin(IMU2_CS_PORT, 1UL << IMU2_CS_PIN);
-
-  if (transfer == SPI_STATUS_OK) {
-    *value = (uint16_t)rx[2] | ((uint16_t)rx[3] << 8);
-  }
-  return map_spi_status(transfer);
+  time_delay_us(2U);
+  return map_spi_status(status);
 }
 
 bmi323_status_t bmi323_read_id(uint16_t *id) {
-  if (id == NULL) {
+  if (!id)
     return BMI323_ERROR_INVALID_ARGUMENT;
-  }
+  /* Address, dummy byte, little-endian 16-bit register value. */
+  const uint8_t tx[] = {0x80U | BMI323_CHIP_ID_REG, 0U, 0U, 0U};
+  uint8_t rx[sizeof(tx)];
+  bmi323_status_t status = transfer(tx, rx, sizeof(tx));
+  if (status == BMI323_OK)
+    *id = (uint16_t)rx[2] | ((uint16_t)rx[3] << 8);
+  return status;
+}
 
-  /* The first SPI access after power-on selects SPI mode. */
-  if (!spi_selected) {
-    uint16_t discard;
-    bmi323_status_t status = bmi323_read_reg(BMI323_CHIP_ID_REG, &discard);
-    if (status != BMI323_OK)
-      return status;
-    spi_selected = true;
-  }
-  return bmi323_read_reg(BMI323_CHIP_ID_REG, id);
+static bmi323_status_t write_reg(uint8_t reg, uint16_t value) {
+  const uint8_t tx[] = {reg, (uint8_t)value, (uint8_t)(value >> 8)};
+  return transfer(tx, NULL, sizeof(tx));
 }
 
 bmi323_status_t bmi323_init(void) {
-  spi_selected = false;
-  uint16_t id = 0U;
+  /* The first CS rising edge selects SPI. Its read data are invalid. */
+  uint16_t id;
   bmi323_status_t status = bmi323_read_id(&id);
-  return status != BMI323_OK
-             ? status
-             : ((id & 0xFFU) == BMI323_CHIP_ID_VAL ? BMI323_OK
-                                                   : BMI323_ERROR_DEVICE_ID);
-}
+  if (status != BMI323_OK)
+    return status;
+  time_delay_us(200U);
 
-const char *bmi323_diagnostic(char *buf, size_t size) {
-  if (!buf || !size)
-    return "BMI323: invalid buffer";
-  uint16_t id = 0U;
-  bmi323_status_t status = bmi323_read_id(&id);
-  if (status == BMI323_OK && (id & 0xFFU) != BMI323_CHIP_ID_VAL)
-    status = BMI323_ERROR_DEVICE_ID;
-  (void)snprintf(buf, size, "BMI323: CHIP_ID=0x%02X %s (%s)", (id & 0xFFU),
-                 (status == BMI323_OK && (id & 0xFFU) == BMI323_CHIP_ID_VAL)
-                     ? "OK"
-                     : "ERROR",
-                 bmi323_status_name(status));
-  return buf;
+  status = bmi323_read_id(&id);
+  if (status != BMI323_OK)
+    return status;
+  if ((id & 0xFFU) != BMI323_CHIP_ID_VAL)
+    return BMI323_ERROR_DEVICE_ID;
+
+  /* Use ±2 g and ±250 dps. Both sensors run in continuous normal mode. */
+  status = write_reg(BMI323_ACC_CONF, BMI323_NORMAL_MODE | BMI323_ODR_800_HZ);
+  if (status != BMI323_OK)
+    return status;
+  return write_reg(BMI323_GYR_CONF, BMI323_NORMAL_MODE | BMI323_RANGE_250_DPS |
+                                        BMI323_ODR_800_HZ);
 }

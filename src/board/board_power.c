@@ -1,8 +1,9 @@
 #include "board/board_power.h"
 #include "board/board_gpio.h"
 #include "board/board_pins.h"
+#include "platform/time.h"
 
-board_power_state_t board_power_init(void) {
+void board_power_init(void) {
   /* Active-low charger enable: keep charging inhibited at boot. */
   board_gpio_pin(BATT_CE_PORT, BATT_CE_PIN, LL_GPIO_MODE_OUTPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
@@ -25,7 +26,13 @@ board_power_state_t board_power_init(void) {
   board_gpio_pin(BATT_INT_PORT, BATT_INT_PIN, LL_GPIO_MODE_INPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_LOW, 0U, false);
-  return BOARD_POWER_RF_OFF;
+}
+
+void board_rf_power_on(void) {
+  board_rf_5v_enable(true);
+  time_delay_ms(200U);
+  board_rf_15v_enable(true);
+  time_delay_ms(200U);
 }
 
 void board_rf_5v_enable(bool enable) {

@@ -1,21 +1,16 @@
-#include <stdio.h>
-
-#include "board/board_pins.h"
 #include "drivers/adf4158.h"
+#include "board/board_pins.h"
+#include "platform/time.h"
 #include "stm32h7xx_ll_gpio.h"
 
 #define ADF4158_MODULUS (1ULL << 25)
 #define ADF4158_RAMP_EN (1UL << 31)
+#define ADF4158_POWER_DOWN (1UL << 5)
+#define ADF4158_MAX_PFD_HZ 32000000ULL
 
 static adf4158_status_t last_status = ADF4158_STATUS_OK;
 static uint32_t saved_r0;
-static bool configured = false;
-static bool ramp_active;
 static bool ramp_configured;
-static uint32_t diagnostic_start_mhz;
-static uint32_t diagnostic_bandwidth_mhz;
-static uint32_t diagnostic_chirp_us;
-static uint32_t diagnostic_delay_us;
 
 adf4158_status_t adf4158_last_status(void) { return last_status; }
 
@@ -38,38 +33,27 @@ const char *adf4158_status_name(adf4158_status_t status) {
   }
 }
 
-static void adf4158_delay(void) {
-  uint32_t cycles = SystemCoreClock / 1000000U;
-  if (cycles == 0U)
-    cycles = 1U;
-
-  uint32_t start = DWT->CYCCNT;
-  while ((uint32_t)(DWT->CYCCNT - start) < cycles) {
-  }
-}
-
 void adf4158_write(uint32_t value) {
   LL_GPIO_ResetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
   LL_GPIO_ResetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
-  adf4158_delay();
+  time_delay_us(1U);
 
   for (int bit = 31; bit >= 0; --bit) {
     if ((value >> bit) & 1U)
       LL_GPIO_SetOutputPin(FREQ_DATA_PORT, 1UL << FREQ_DATA_PIN);
     else
       LL_GPIO_ResetOutputPin(FREQ_DATA_PORT, 1UL << FREQ_DATA_PIN);
-    adf4158_delay();
+    time_delay_us(1U);
 
     LL_GPIO_SetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
-    adf4158_delay();
+    time_delay_us(1U);
 
     LL_GPIO_ResetOutputPin(FREQ_CLK_PORT, 1UL << FREQ_CLK_PIN);
-    adf4158_delay();
+    time_delay_us(1U);
   }
 
-  adf4158_delay();
   LL_GPIO_SetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
-  adf4158_delay();
+  time_delay_us(1U);
   LL_GPIO_ResetOutputPin(FREQ_LE_PORT, 1UL << FREQ_LE_PIN);
 }
 
@@ -91,21 +75,21 @@ static bool pll_registers(const adf4158_fixed_config_t *cfg, uint16_t clk1,
 
   uint32_t denominator = cfg->r_counter * (cfg->reference_div2 ? 2U : 1U);
 
-  if (ref > 32000000ULL * denominator || ref < denominator) {
+  if (ref > ADF4158_MAX_PFD_HZ * denominator || ref < denominator) {
     return false;
   }
 
   uint64_t n =
       rounded_div(cfg->frequency_hz * denominator * ADF4158_MODULUS, ref);
 
-  uint32_t integer = (uint32_t)(n >> 25);
+  uint64_t integer = n >> 25;
   uint32_t frac = (uint32_t)(n & (ADF4158_MODULUS - 1U));
 
   if (integer < (cfg->prescaler_8_9 ? 75U : 23U) || integer > 4095U) {
     return false;
   }
 
-  *r0 = (integer << 15) | ((frac >> 13) << 3);
+  *r0 = ((uint32_t)integer << 15) | ((frac >> 13) << 3);
   *r1 = ((frac & 0x1FFFU) << 15) | 1U;
 
   *r2 = ((uint32_t)cfg->cp_current << 24) |
@@ -120,6 +104,7 @@ static bool pll_registers(const adf4158_fixed_config_t *cfg, uint16_t clk1,
 static void program_registers(uint32_t r0, uint32_t r1, uint32_t r2,
                               uint32_t r3, uint32_t r4, uint32_t r5,
                               uint32_t r6, uint32_t r7) {
+  adf4158_stop_ramp();
   adf4158_write(r7);
   adf4158_write(r6);
   adf4158_write((1U << 23) | 6U);
@@ -130,10 +115,12 @@ static void program_registers(uint32_t r0, uint32_t r1, uint32_t r2,
   adf4158_write(r2);
   adf4158_write(r1);
   adf4158_write(r0);
+}
 
-  saved_r0 = r0 & ~ADF4158_RAMP_EN;
-  configured = true;
-  ramp_active = false;
+void adf4158_power_down(void) {
+  adf4158_stop_ramp();
+  adf4158_write(ADF4158_POWER_DOWN | 3U);
+  ramp_configured = false;
 }
 
 bool adf4158_program_fixed(const adf4158_fixed_config_t *cfg) {
@@ -149,7 +136,6 @@ bool adf4158_program_fixed(const adf4158_fixed_config_t *cfg) {
   program_registers(r0, r1, r2, r3, 4U, 5U, 6U, 7U);
   ramp_configured = false;
   last_status = ADF4158_STATUS_OK;
-  diagnostic_start_mhz = (uint32_t)(cfg->frequency_hz / 1000000ULL);
   return true;
 }
 
@@ -158,9 +144,9 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
   if (cfg == 0 || cfg->steps == 0U || cfg->steps > 10000U ||
       cfg->bandwidth_hz == 0U || cfg->bandwidth_hz > 500000000U ||
       cfg->chirp_us == 0U || cfg->chirp_us > 1000000U ||
-      cfg->mode > ADF4158_RAMP_SINGLE ||
+      (unsigned)cfg->mode > ADF4158_RAMP_SINGLE ||
       (cfg->delay_us != 0U && cfg->mode != ADF4158_RAMP_SAWTOOTH) ||
-      cfg->pll.frequency_hz + cfg->bandwidth_hz > 6100000000ULL) {
+      cfg->pll.frequency_hz > 6100000000ULL - cfg->bandwidth_hz) {
     last_status = ADF4158_STATUS_INVALID_CONFIG;
     return false;
   }
@@ -176,9 +162,8 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
     return false;
   }
 
-  uint32_t pfd_hz = (uint32_t)(ref / denominator);
-
-  if (pfd_hz == 0U) {
+  uint64_t pfd_hz = ref / denominator;
+  if (pfd_hz > ADF4158_MAX_PFD_HZ) {
     last_status = ADF4158_STATUS_PLL_RANGE;
     return false;
   }
@@ -248,11 +233,11 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
 
   // R7: delay between sawtooth ramps.
   // Delay = CLK1 * delay_word / fPFD.
-  uint32_t delay_word = 0U;
+  uint64_t delay_word = 0U;
 
   if (cfg->delay_us != 0U) {
-    delay_word = (uint32_t)rounded_div((uint64_t)cfg->delay_us * pfd_hz,
-                                       (uint64_t)clk1 * 1000000ULL);
+    delay_word = rounded_div((uint64_t)cfg->delay_us * pfd_hz,
+                             (uint64_t)clk1 * 1000000ULL);
 
     if (delay_word == 0U || delay_word > 4095U) {
       last_status = ADF4158_STATUS_RAMP_DELAY;
@@ -265,7 +250,7 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
   if (delay_word != 0U) {
     r7 |= (1U << 17); // Ramp delay enable
     r7 |= (1U << 16); // PFD * CLK1 delay clock
-    r7 |= (delay_word << 3);
+    r7 |= (uint32_t)delay_word << 3;
   }
 
   uint32_t r3 =
@@ -279,12 +264,8 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
 
   program_registers(r0, r1, r2, r3, r4, r5, r6, r7);
 
-  diagnostic_start_mhz = (uint32_t)(cfg->pll.frequency_hz / 1000000ULL);
-  diagnostic_bandwidth_mhz = cfg->bandwidth_hz / 1000000U;
-  diagnostic_chirp_us = cfg->chirp_us;
-  diagnostic_delay_us = cfg->delay_us;
+  saved_r0 = r0;
   ramp_configured = true;
-  adf4158_start_ramp();
 
   if (result != 0) {
     uint64_t actual_step = (uint64_t)best_dev * (1ULL << best_offset) * pfd_hz;
@@ -294,13 +275,11 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
     result->bandwidth_hz =
         (uint32_t)rounded_div(actual_step * cfg->steps, ADF4158_MODULUS);
 
-    result->step_ns = (uint32_t)rounded_div(ticks * 1000000000ULL, pfd_hz);
+    result->step_ns = rounded_div(ticks * 1000000000ULL, pfd_hz);
 
-    result->chirp_ns =
-        (uint32_t)rounded_div(ticks * cfg->steps * 1000000000ULL, pfd_hz);
+    result->chirp_ns = rounded_div(ticks * cfg->steps * 1000000000ULL, pfd_hz);
 
-    result->delay_ns = (uint32_t)rounded_div(
-        (uint64_t)delay_word * clk1 * 1000000000ULL, pfd_hz);
+    result->delay_ns = rounded_div(delay_word * clk1 * 1000000000ULL, pfd_hz);
 
     result->interval_ns = result->chirp_ns + result->delay_ns;
 
@@ -315,39 +294,13 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
 }
 
 void adf4158_stop_ramp(void) {
-  if (configured) {
+  if (ramp_configured)
     adf4158_write(saved_r0);
-    ramp_active = false;
-  }
 }
 
 void adf4158_start_ramp(void) {
-  if (configured) {
+  if (ramp_configured) {
     adf4158_write(saved_r0);
     adf4158_write(saved_r0 | ADF4158_RAMP_EN);
-    ramp_active = true;
   }
-}
-
-const char *adf4158_diagnostic(char *buf, size_t size) {
-  if (!buf || !size)
-    return "ADF4158: invalid buffer";
-  if (last_status != ADF4158_STATUS_OK) {
-    (void)snprintf(buf, size, "ADF4158: %s (last programming attempt)",
-                   adf4158_status_name(last_status));
-  } else if (!configured) {
-    (void)snprintf(buf, size, "ADF4158: not programmed (no readback)");
-  } else if (ramp_configured) {
-    (void)snprintf(
-        buf, size,
-        "ADF4158: ramp=%s start=%luMHz BW=%luMHz chirp=%luus delay=%luus "
-        "lock=unverified",
-        ramp_active ? "on" : "off", (unsigned long)diagnostic_start_mhz,
-        (unsigned long)diagnostic_bandwidth_mhz,
-        (unsigned long)diagnostic_chirp_us, (unsigned long)diagnostic_delay_us);
-  } else {
-    (void)snprintf(buf, size, "ADF4158: fixed=%luMHz lock=unverified",
-                   (unsigned long)diagnostic_start_mhz);
-  }
-  return buf;
 }

@@ -18,7 +18,7 @@ typedef enum {
 
 const char *acquisition_status_name(acquisition_status_t status);
 
-/* The ADC driver performs register access with polling before DMA starts. */
+/* Call from the foreground after polling ADC register configuration. */
 acquisition_status_t acquisition_init(void);
 
 /* Synchronous one-pair diagnostic; returns the previous ADC conversion. */
@@ -28,8 +28,9 @@ acquisition_status_t acquisition_capture_one(ad4683_sample_t *sample,
 /* True while either acquisition method owns the SPI4/SPI5 bus. */
 bool acquisition_is_busy(void);
 
-/* Timed acquisition is continuous: no chirp or frame scheduling yet.
- * Each channel receives the same samples_per_block number of 16-bit codes.
+/* Continuous timed acquisition. Each channel receives samples_per_block
+ * 16-bit codes. The first code pair is from the preceding ADC transaction
+ * because every CS pulse returns the previous conversion.
  * The timer clock is 240 MHz and the SPI5 kernel clock is 120 MHz under
  * the firmware's existing clock configuration. Supported rates must divide
  * 240 MHz exactly; max tested design target is 400 kSPS.
@@ -52,8 +53,8 @@ typedef struct {
  * acquisition_capture_one() and all polling ADC register/diagnostic access.
  * Call after acquisition_init() and ad4683_init().
  */
-acquisition_status_t acquisition_timed_init(
-  const acquisition_timed_config_t *config);
+acquisition_status_t
+acquisition_timed_init(const acquisition_timed_config_t *config);
 acquisition_status_t acquisition_timed_start(void);
 
 /* Stop the timer first, then SPI and DMA. A fully completed block remains
@@ -62,13 +63,12 @@ acquisition_status_t acquisition_timed_start(void);
 acquisition_status_t acquisition_timed_stop(void);
 
 /* ACQUISITION_BUSY means no *new complete paired* block is available.
- * Buffer pointers are borrowed: release promptly, before DMA reuses them.
- * No copying is performed. A missed deadline stops sampling with OVERRUN.
+ * The views expire when DMA switches back to their target or at the next
+ * start. Release each block before the next block completes. If DMA catches
+ * up first, OVERRUN stops sampling and invalidates the outstanding block.
  */
 acquisition_status_t acquisition_timed_get_block(acquisition_block_t *block);
 acquisition_status_t acquisition_timed_release_block(uint32_t sequence);
 
 /* Return PF6 to GPIO CS and restore the working single-sample SPI/DMA setup. */
 acquisition_status_t acquisition_timed_deinit(void);
-
-const char *acquisition_diagnostic(char *buf, size_t size);

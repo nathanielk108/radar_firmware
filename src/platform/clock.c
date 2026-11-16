@@ -13,18 +13,9 @@ static bool clock_timed_out(uint32_t start) {
   return (uint32_t)(DWT->CYCCNT - start) >= cycles;
 }
 
-static bool wait_set(volatile uint32_t *reg, uint32_t mask) {
+static bool wait_mask(volatile uint32_t *reg, uint32_t mask, uint32_t value) {
   uint32_t start = DWT->CYCCNT;
-  while ((*reg & mask) != mask) {
-    if (clock_timed_out(start))
-      return false;
-  }
-  return true;
-}
-
-static bool wait_clear(volatile uint32_t *reg, uint32_t mask) {
-  uint32_t start = DWT->CYCCNT;
-  while ((*reg & mask) != 0U) {
+  while ((*reg & mask) != value) {
     if (clock_timed_out(start))
       return false;
   }
@@ -33,10 +24,8 @@ static bool wait_clear(volatile uint32_t *reg, uint32_t mask) {
 
 static bool configure_vos0(void) {
   MODIFY_REG(PWR->D3CR, PWR_D3CR_VOS, PWR_D3CR_VOS);
-
-  if (!wait_set(&PWR->CSR1, PWR_CSR1_ACTVOSRDY)) {
+  if (!wait_mask(&PWR->CSR1, PWR_CSR1_ACTVOSRDY, PWR_CSR1_ACTVOSRDY))
     return false;
-  }
 
   // SYSCFG must be enabled before ODEN can be used
   RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
@@ -45,32 +34,23 @@ static bool configure_vos0(void) {
   // VOS1 + ODEN = VOS0
   SYSCFG->PWRCR |= SYSCFG_PWRCR_ODEN;
 
-  if (!wait_set(&PWR->CSR1, PWR_CSR1_ACTVOSRDY)) {
-    return false;
-  }
-
-  return true;
+  return wait_mask(&PWR->CSR1, PWR_CSR1_ACTVOSRDY, PWR_CSR1_ACTVOSRDY);
 }
 
 static bool configure_flash(void) {
   MODIFY_REG(FLASH->ACR, FLASH_ACR_LATENCY_Msk | FLASH_ACR_WRHIGHFREQ_Msk,
              FLASH_ACR_LATENCY_4WS | FLASH_ACR_WRHIGHFREQ_1);
 
-  return wait_set(&FLASH->ACR, FLASH_ACR_LATENCY_4WS);
-}
-
-static bool enable_hse(void) {
-  RCC->CR |= RCC_CR_HSEON;
-
-  return wait_set(&RCC->CR, RCC_CR_HSERDY);
+  return wait_mask(&FLASH->ACR,
+                   FLASH_ACR_LATENCY_Msk | FLASH_ACR_WRHIGHFREQ_Msk,
+                   FLASH_ACR_LATENCY_4WS | FLASH_ACR_WRHIGHFREQ_1);
 }
 
 static bool configure_pll1(void) {
   RCC->CR &= ~RCC_CR_PLL1ON;
 
-  if (!wait_clear(&RCC->CR, RCC_CR_PLL1RDY)) {
+  if (!wait_mask(&RCC->CR, RCC_CR_PLL1RDY, 0U))
     return false;
-  }
 
   MODIFY_REG(RCC->PLLCKSELR, RCC_PLLCKSELR_PLLSRC_Msk | RCC_PLLCKSELR_DIVM1_Msk,
              RCC_PLLCKSELR_PLLSRC_HSE | (5U << RCC_PLLCKSELR_DIVM1_Pos));
@@ -90,11 +70,7 @@ static bool configure_pll1(void) {
 
   RCC->CR |= RCC_CR_PLL1ON;
 
-  if (!wait_set(&RCC->CR, RCC_CR_PLL1RDY)) {
-    return false;
-  }
-
-  return true;
+  return wait_mask(&RCC->CR, RCC_CR_PLL1RDY, RCC_CR_PLL1RDY);
 }
 
 static void configure_bus_clocks(void) {
@@ -109,49 +85,41 @@ static void configure_bus_clocks(void) {
   MODIFY_REG(RCC->D3CFGR, RCC_D3CFGR_D3PPRE_Msk, RCC_D3CFGR_D3PPRE_DIV2);
 }
 
-static bool select_pll1_sysclk(void) {
-  MODIFY_REG(RCC->CFGR, RCC_CFGR_SW_Msk, RCC_CFGR_SW_PLL1);
-
-  uint32_t start = DWT->CYCCNT;
-  while (!clock_timed_out(start)) {
-    if ((RCC->CFGR & RCC_CFGR_SWS_Msk) == RCC_CFGR_SWS_PLL1) {
-      return true;
-    }
-  }
-
-  return false;
+static void configure_peripheral_clocks(void) {
+  /* SPI1/2/3 use PLL1Q (48 MHz); SPI4/5 use PCLK2 (120 MHz). */
+  CLEAR_BIT(RCC->D2CCIP1R, RCC_D2CCIP1R_SPI123SEL | RCC_D2CCIP1R_SPI45SEL);
+  /* I2C4 uses PCLK4. APB timer clocks run at twice PCLK. */
+  CLEAR_BIT(RCC->D3CCIPR, RCC_D3CCIPR_I2C4SEL);
+  CLEAR_BIT(RCC->CFGR, RCC_CFGR_TIMPRE);
 }
 
 // Initialize MCU clock to 480 MHz
 clock_status_t clock_init(void) {
   const uint16_t revision = (uint16_t)(DBGMCU->IDCODE >> 16);
 
-  if (revision != 0x2001U && revision != 0x2003U) {
+  /* ES0392 specifies 480 MHz for revisions X and V. */
+  if (revision != 0x2001U && revision != 0x2003U)
     return CLOCK_ERR_SILICON_REV;
-  }
 
-  if (!configure_vos0()) {
+  if (!configure_vos0())
     return CLOCK_ERR_VOS;
-  }
-
   if (!configure_flash())
     return CLOCK_ERR_FLASH;
 
-  if (!enable_hse()) {
+  SET_BIT(RCC->CR, RCC_CR_HSEON);
+  if (!wait_mask(&RCC->CR, RCC_CR_HSERDY, RCC_CR_HSERDY))
     return CLOCK_ERR_HSE;
-  }
 
   configure_bus_clocks();
+  configure_peripheral_clocks();
 
-  if (!configure_pll1()) {
+  if (!configure_pll1())
     return CLOCK_ERR_PLL;
-  }
 
-  if (!select_pll1_sysclk()) {
+  MODIFY_REG(RCC->CFGR, RCC_CFGR_SW_Msk, RCC_CFGR_SW_PLL1);
+  if (!wait_mask(&RCC->CFGR, RCC_CFGR_SWS_Msk, RCC_CFGR_SWS_PLL1))
     return CLOCK_ERR_SYSCLK;
-  }
 
   SystemCoreClockUpdate();
-
   return CLOCK_OK;
 }

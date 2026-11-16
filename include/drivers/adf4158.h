@@ -1,11 +1,7 @@
 #pragma once
-#include <stddef.h>
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#define ADF4158_REFERENCE_HZ 10000000U
-#define ADF4158_CP_CURRENT 15U
 
 typedef enum {
   ADF4158_STATUS_OK = 0,
@@ -49,10 +45,10 @@ typedef struct {
 typedef struct {
   uint32_t step_hz;
   uint32_t bandwidth_hz;
-  uint32_t step_ns;
-  uint32_t chirp_ns;
-  uint32_t delay_ns;
-  uint32_t interval_ns;
+  uint64_t step_ns;
+  uint64_t chirp_ns;
+  uint64_t delay_ns;
+  uint64_t interval_ns;
   uint16_t deviation;
   uint8_t deviation_offset;
   uint16_t clk1;
@@ -60,13 +56,12 @@ typedef struct {
 } adf4158_ramp_result_t;
 
 void adf4158_write(uint32_t value);
+void adf4158_power_down(void);
 
 bool adf4158_program_fixed(const adf4158_fixed_config_t *config);
+/* Load the ramp registers with ramp enable clear. */
 bool adf4158_program_ramp(const adf4158_ramp_config_t *config,
                           adf4158_ramp_result_t *result);
 
 void adf4158_stop_ramp(void);
 void adf4158_start_ramp(void);
-
-/* Returns the caller-owned buffer; do not call from an ISR. */
-const char *adf4158_diagnostic(char *buf, size_t size);

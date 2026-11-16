@@ -1,7 +1,5 @@
 #pragma once
-#include <stddef.h>
 
-#include "platform/spi.h"
 #include <stdint.h>
 
 typedef enum {
@@ -20,9 +18,5 @@ const char *bmi323_status_name(bmi323_status_t status);
 #define BMI323_CHIP_ID_VAL 0x0043U
 
 /* Requires board_spi_imu2_init() and spi_init(&imu2_spi_config). */
-bmi323_status_t bmi323_read_id(uint16_t *id);
-
-/* Returns the caller-owned buffer; do not call from an ISR. */
-const char *bmi323_diagnostic(char *buf, size_t size);
-
 bmi323_status_t bmi323_init(void);
+bmi323_status_t bmi323_read_id(uint16_t *id);

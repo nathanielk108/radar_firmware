@@ -37,3 +37,11 @@ void time_delay_ms(uint32_t duration) {
     __NOP();
   }
 }
+
+void time_delay_us(uint32_t duration) {
+  const uint32_t cycles = (SystemCoreClock / 1000000U) * duration;
+  const uint32_t start = DWT->CYCCNT;
+  while ((uint32_t)(DWT->CYCCNT - start) < cycles) {
+    __NOP();
+  }
+}

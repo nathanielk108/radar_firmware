@@ -26,10 +26,15 @@
 
 #define USB_DP_PORT GPIOA
 #define USB_DP_PIN 12U
-#define USB_DN_PORT GPIOA
-#define USB_DN_PIN 11U
+#define USB_DM_PORT GPIOA
+#define USB_DM_PIN 11U
+#define USB_DATA_AF 10U
 #define USB_VBUS_PORT GPIOA
 #define USB_VBUS_PIN 9U
+
+#define DEBUG_SWO_PORT GPIOB
+#define DEBUG_SWO_PIN 3U
+#define DEBUG_SWO_AF 0U
 
 // SPI
 
@@ -125,6 +130,9 @@
 #define DISPLAY_BL_PORT GPIOD
 #define DISPLAY_BL_PIN 12U
 #define DISPLAY_BL_AF 2U
+
+#define DISPLAY_RESET_PORT GPIOD
+#define DISPLAY_RESET_PIN 11U
 
 // Timer
 

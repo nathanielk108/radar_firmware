@@ -46,8 +46,8 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   ITCMRAM    (xrw)    : ORIGIN = 0x00000000,   LENGTH = 64K
-  RAM        (xrw)    : ORIGIN = 0x24000000,   LENGTH = 128K
-  DMA_RAM    (xrw)    : ORIGIN = 0x30000000,   LENGTH = 64K   /* Custom section for dma buffers for radar firmware */
+  RAM        (xrw)    : ORIGIN = 0x24000000,   LENGTH = 512K
+  DMA_RAM    (xrw)    : ORIGIN = 0x30000000,   LENGTH = 64K   /* Non-cacheable MPU region in SRAM1 */
   ROM        (rx)     : ORIGIN = 0x08000000,   LENGTH = 2048K
 }
 

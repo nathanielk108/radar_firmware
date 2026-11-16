@@ -1,9 +1,13 @@
 #include "drivers/ism330is.h"
-#include <stdio.h>
-
 #include "board/board_pins.h"
 #include "board/board_spi.h"
 #include "stm32h7xx_ll_gpio.h"
+
+#define ISM330IS_CTRL1_XL 0x10U
+#define ISM330IS_CTRL3_C 0x12U
+#define ISM330IS_ODR_833_HZ (7U << 4)
+#define ISM330IS_BDU (1U << 6)
+#define ISM330IS_IF_INC (1U << 2)
 
 static ism330is_status_t map_spi_status(spi_status_t status) {
   switch (status) {
@@ -43,44 +47,40 @@ const char *ism330is_status_name(ism330is_status_t status) {
   }
 }
 
-ism330is_status_t ism330is_read_id(uint8_t *id) {
-  if (id == NULL) {
-    return ISM330IS_ERROR_INVALID_ARGUMENT;
-  }
-
-  /* Bit 7 selects read; the second byte clocks out WHO_AM_I. */
-  const uint8_t tx[2] = {0x80U | ISM330IS_WHO_AM_I_REG, 0x00U};
-  uint8_t rx[2] = {0U, 0U};
-
+static ism330is_status_t transfer(const uint8_t *tx, uint8_t *rx,
+                                  uint16_t count) {
   LL_GPIO_ResetOutputPin(IMU1_CS_PORT, 1UL << IMU1_CS_PIN);
-  spi_status_t transfer = spi_transfer(&imu1_spi_config, tx, rx, 2U, 20U);
+  spi_status_t status = spi_transfer(&imu1_spi_config, tx, rx, count, 20U);
   LL_GPIO_SetOutputPin(IMU1_CS_PORT, 1UL << IMU1_CS_PIN);
+  return map_spi_status(status);
+}
 
-  if (transfer == SPI_STATUS_OK) {
+ism330is_status_t ism330is_read_id(uint8_t *id) {
+  if (!id)
+    return ISM330IS_ERROR_INVALID_ARGUMENT;
+  const uint8_t tx[] = {0x80U | ISM330IS_WHO_AM_I_REG, 0U};
+  uint8_t rx[sizeof(tx)];
+  ism330is_status_t status = transfer(tx, rx, sizeof(tx));
+  if (status == ISM330IS_OK)
     *id = rx[1];
-  }
-  return map_spi_status(transfer);
+  return status;
 }
 
 ism330is_status_t ism330is_init(void) {
-  uint8_t id = 0U;
+  uint8_t id;
   ism330is_status_t status = ism330is_read_id(&id);
-  return status != ISM330IS_OK
-             ? status
-             : (id == ISM330IS_WHO_AM_I_VAL ? ISM330IS_OK
-                                            : ISM330IS_ERROR_DEVICE_ID);
-}
+  if (status != ISM330IS_OK)
+    return status;
+  if (id != ISM330IS_WHO_AM_I_VAL)
+    return ISM330IS_ERROR_DEVICE_ID;
 
-const char *ism330is_diagnostic(char *buf, size_t size) {
-  if (!buf || !size)
-    return "ISM330IS: invalid buffer";
-  uint8_t id = 0U;
-  ism330is_status_t status = ism330is_read_id(&id);
-  if (status == ISM330IS_OK && id != ISM330IS_WHO_AM_I_VAL)
-    status = ISM330IS_ERROR_DEVICE_ID;
-  (void)snprintf(
-      buf, size, "ISM330IS: WHO_AM_I=0x%02X %s (%s)", id,
-      (status == ISM330IS_OK && id == ISM330IS_WHO_AM_I_VAL) ? "OK" : "ERROR",
-      ism330is_status_name(status));
-  return buf;
+  const uint8_t ctrl3[] = {ISM330IS_CTRL3_C, ISM330IS_BDU | ISM330IS_IF_INC};
+  status = transfer(ctrl3, NULL, sizeof(ctrl3));
+  if (status != ISM330IS_OK)
+    return status;
+
+  /* CTRL1_XL and CTRL2_G are adjacent. Use ±2 g and ±250 dps. */
+  const uint8_t sensors[] = {ISM330IS_CTRL1_XL, ISM330IS_ODR_833_HZ,
+                             ISM330IS_ODR_833_HZ};
+  return transfer(sensors, NULL, sizeof(sensors));
 }

@@ -1,46 +1,7 @@
 #pragma once
-#include <stddef.h>
-
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#define BQ25883_I2C_ADDRESS 0x6BU
-
-#define BQ25883_REG_VREG 0x00U
-#define BQ25883_REG_ICHG 0x01U
-#define BQ25883_REG_VINDPM 0x02U
-#define BQ25883_REG_IINDPM 0x03U
-#define BQ25883_REG_PRE_TERM 0x04U
-#define BQ25883_REG_CTRL1 0x05U
-#define BQ25883_REG_CTRL2 0x06U
-#define BQ25883_REG_CTRL3 0x07U
-#define BQ25883_REG_CTRL4 0x08U
-
-#define BQ25883_REG_STATUS1 0x0BU
-#define BQ25883_REG_STATUS2 0x0CU
-#define BQ25883_REG_NTC 0x0DU
-#define BQ25883_REG_FAULT 0x0EU
-
-#define BQ25883_REG_ADC_CTRL 0x15U
-#define BQ25883_REG_ADC_DISABLE 0x16U
-
-#define BQ25883_REG_IBUS_H 0x17U
-#define BQ25883_REG_IBUS_L 0x18U
-#define BQ25883_REG_ICHG_H 0x19U
-#define BQ25883_REG_ICHG_L 0x1AU
-#define BQ25883_REG_VBUS_H 0x1BU
-#define BQ25883_REG_VBUS_L 0x1CU
-#define BQ25883_REG_VBAT_H 0x1DU
-#define BQ25883_REG_VBAT_L 0x1EU
-#define BQ25883_REG_VSYS_H 0x1FU
-#define BQ25883_REG_VSYS_L 0x20U
-#define BQ25883_REG_TS_H 0x21U
-#define BQ25883_REG_TS_L 0x22U
-#define BQ25883_REG_TDIE_H 0x23U
-#define BQ25883_REG_TDIE_L 0x24U
-
-#define BQ25883_REG_PART_INFO 0x25U
 
 typedef enum {
   BQ25883_OK = 0,
@@ -49,7 +10,7 @@ typedef enum {
   BQ25883_ERROR_RANGE,
   BQ25883_ERROR_TIMEOUT,
   BQ25883_ERROR_VERIFY,
-  BQ25883_ERROR_SAFETY,
+  BQ25883_ERROR_ADC,
   BQ25883_ERROR_INVALID_ARGUMENT,
   BQ25883_ERROR_NACK,
   BQ25883_ERROR_BUS,
@@ -88,25 +49,19 @@ typedef struct {
   uint16_t vsys_mv;
   uint16_t ichg_ma;
   int16_t ibus_ma;
-  uint16_t tdie_half_c;
+  int16_t tdie_half_c;
 } bq25883_snapshot_t;
 
+/* Configures the charger with CE inhibited. */
+bq25883_status_t bq25883_init(void);
 bq25883_status_t bq25883_check_id(uint8_t *part_info);
 bq25883_status_t bq25883_set_charge_enabled(bool enable);
-bq25883_status_t bq25883_set_otg_enabled(bool enable);
-bq25883_status_t bq25883_disable_watchdog(void);
 bq25883_status_t bq25883_set_charge_voltage_mv(uint16_t mv);
 bq25883_status_t bq25883_set_charge_current_ma(uint16_t ma);
 bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma);
 bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma);
-/* Enable the free-running ADC (called once during setup). */
-bq25883_status_t bq25883_adc_convert(void);
+/* Starts and waits for a fresh one-shot ADC conversion. */
 bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *s);
-bq25883_status_t bq25883_prepare_for_bringup(void);
-bool bq25883_power_good(void);
-
-/* Returns the caller-owned buffer; do not call from an ISR. */
-const char *bq25883_diagnostic(char *buf, size_t size);
 
 const char *bq25883_status_name(bq25883_status_t status);
