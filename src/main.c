@@ -36,8 +36,8 @@
 #define ADC_DMA_SELF_TEST_COUNT 0U
 
 /* TIM16 + DMA2 prototype: 64 paired conversions, then stop and dump USB CSV. */
-#define ADC_TIMED_TEST_RATE_HZ 100000U
-#define ADC_TIMED_TEST_SAMPLES 64U
+#define ADC_TIMED_TEST_RATE_HZ 400000U
+#define ADC_TIMED_TEST_SAMPLES 100U
 #define ADC_TIMED_TEST_PERIOD_MS 2000U
 
 static bool usb_ready;

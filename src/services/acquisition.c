@@ -402,10 +402,14 @@ const char *acquisition_diagnostic(char *buf, size_t size) {
   return buf;
 }
 
-static void timed_rx_completed(bool channel_a) {
-  if (mode != ACQ_MODE_TIMED || state != ACQ_BUSY)
+static void timed_rx_completed(uint32_t stream) {
+  /* Disabling a DMA stream also sets TCIF (RM0433, DMA transfer suspension).
+   * Only a TC from a still-enabled double-buffered stream completes a block.
+   */
+  if (mode != ACQ_MODE_TIMED || state != ACQ_BUSY ||
+      !LL_DMA_IsEnabledStream(DMA2, stream))
     return;
-  if (channel_a)
+  if (stream == DMA_RX_A)
     ++timed_a_completed;
   else
     ++timed_b_completed;
@@ -484,7 +488,7 @@ void DMA2_Stream1_IRQHandler(void) {
   if (LL_DMA_IsActiveFlag_TC1(DMA2)) {
     LL_DMA_ClearFlag_TC1(DMA2);
     if (mode == ACQ_MODE_TIMED)
-      timed_rx_completed(true);
+      timed_rx_completed(DMA_RX_A);
     else
       single_events |= DMA_RX_A_DONE;
   }
@@ -513,7 +517,7 @@ void DMA2_Stream2_IRQHandler(void) {
   if (LL_DMA_IsActiveFlag_TC2(DMA2)) {
     LL_DMA_ClearFlag_TC2(DMA2);
     if (mode == ACQ_MODE_TIMED)
-      timed_rx_completed(false);
+      timed_rx_completed(DMA_RX_B);
     else
       single_events |= DMA_RX_B_DONE;
   }
