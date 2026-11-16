@@ -1,8 +1,5 @@
 #pragma once
 
-#include "drivers/ad4683.h"
-
-#include <stdbool.h>
 #include <stdint.h>
 
 typedef enum {
@@ -21,20 +18,18 @@ const char *acquisition_status_name(acquisition_status_t status);
 /* Call from the foreground after polling ADC register configuration. */
 acquisition_status_t acquisition_init(void);
 
-/* Synchronous one-pair diagnostic; returns the previous ADC conversion. */
-acquisition_status_t acquisition_capture_one(ad4683_sample_t *sample,
-                                             uint32_t timeout_ms);
-
-/* True while either acquisition method owns the SPI4/SPI5 bus. */
-bool acquisition_is_busy(void);
-
 /* Continuous timed acquisition. Each channel receives samples_per_block
  * 16-bit codes. The first code pair is from the preceding ADC transaction
  * because every CS pulse returns the previous conversion.
  * The timer clock is 240 MHz and the SPI5 kernel clock is 120 MHz under
  * the firmware's existing clock configuration. Supported rates must divide
- * 240 MHz exactly; max tested design target is 400 kSPS.
+ * 240 MHz exactly; the design target is 400 kSPS.
  */
+#define ACQUISITION_TIMER_HZ 240000000U
+#define ACQUISITION_SAMPLE_RATE_HZ 400000U
+#define ACQUISITION_TIMER_TICKS                                                \
+  (ACQUISITION_TIMER_HZ / ACQUISITION_SAMPLE_RATE_HZ)
+#define ACQUISITION_CS_OFFSET_TICKS 384U
 #define ACQUISITION_MAX_BLOCK_SAMPLES 128U
 
 typedef struct {
@@ -43,15 +38,14 @@ typedef struct {
 } acquisition_timed_config_t;
 
 typedef struct {
-  const uint16_t *a;
-  const uint16_t *b;
+  const int16_t *a;
+  const int16_t *b;
   uint16_t count;
   uint32_t sequence;
 } acquisition_block_t;
 
-/* Configure timer, CS pin mux, SPI and three DMA2 streams. Exclusive with
- * acquisition_capture_one() and all polling ADC register/diagnostic access.
- * Call after acquisition_init() and ad4683_init().
+/* Configure continuous capture. Exclusive with burst and polling ADC access.
+ * Call acquisition_init() after configuring the ADC.
  */
 acquisition_status_t
 acquisition_timed_init(const acquisition_timed_config_t *config);
@@ -70,5 +64,19 @@ acquisition_status_t acquisition_timed_stop(void);
 acquisition_status_t acquisition_timed_get_block(acquisition_block_t *block);
 acquisition_status_t acquisition_timed_release_block(uint32_t sequence);
 
-/* Return PF6 to GPIO CS and restore the working single-sample SPI/DMA setup. */
+/* Return PF6 to GPIO CS and restore polling SPI settings. */
 acquisition_status_t acquisition_timed_deinit(void);
+
+/* Arm a finite 400 kSPS burst and leave TIM16 stopped in one-pulse mode.
+ * The board timing DMA starts it externally. TIM16 generates samples + 1
+ * frames and stops after the pipeline-drain frame.
+ */
+acquisition_status_t acquisition_burst_arm(uint16_t samples);
+
+/* Return aligned signed ADC views after both DMA streams and TIM16 finish.
+ * Views are valid until the next burst arm. This call skips the stale word.
+ */
+acquisition_status_t acquisition_burst_finish(acquisition_block_t *block);
+
+/* Disarm the board's trigger DMA before aborting a burst. */
+acquisition_status_t acquisition_burst_stop(void);

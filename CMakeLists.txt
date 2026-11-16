@@ -47,7 +47,9 @@ set(FIRMWARE_SOURCES
   src/board/board_spi.c
   src/board/board_i2c.c
   src/board/board_freq.c
+  src/board/board_gain.c
   src/board/board_usb.c
+  src/board/board_usb_cc.c
   src/board/board_display.c
   src/board/board_dma.c
   src/board/board_timer.c
@@ -59,6 +61,8 @@ set(FIRMWARE_SOURCES
   src/drivers/bmi323.c
   src/system/log.c
   src/services/acquisition.c
+  src/services/chirp.c
+  src/services/usb_charge.c
 )
 
 set(VENDOR_SOURCES

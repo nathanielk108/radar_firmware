@@ -7,6 +7,8 @@
 #define ADF4158_RAMP_EN (1UL << 31)
 #define ADF4158_POWER_DOWN (1UL << 5)
 #define ADF4158_MAX_PFD_HZ 32000000ULL
+#define ADF4158_SYNC_N_WORD (1UL << 15)
+#define ADF4158_TX_RAMP_CLK (1UL << 29)
 
 static adf4158_status_t last_status = ADF4158_STATUS_OK;
 static uint32_t saved_r0;
@@ -109,7 +111,7 @@ static void program_registers(uint32_t r0, uint32_t r1, uint32_t r2,
   adf4158_write(r6);
   adf4158_write((1U << 23) | 6U);
   adf4158_write(r5);
-  adf4158_write((1U << 23) | 5U);
+  adf4158_write((r5 & ADF4158_TX_RAMP_CLK) | (1U << 23) | 5U);
   adf4158_write(r4);
   adf4158_write(r3);
   adf4158_write(r2);
@@ -143,9 +145,11 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
                           adf4158_ramp_result_t *result) {
   if (cfg == 0 || cfg->steps == 0U || cfg->steps > 10000U ||
       cfg->bandwidth_hz == 0U || cfg->bandwidth_hz > 500000000U ||
-      cfg->chirp_us == 0U || cfg->chirp_us > 1000000U ||
+      (!cfg->external_step_hz &&
+       (cfg->chirp_us == 0U || cfg->chirp_us > 1000000U)) ||
       (unsigned)cfg->mode > ADF4158_RAMP_SINGLE ||
-      (cfg->delay_us != 0U && cfg->mode != ADF4158_RAMP_SAWTOOTH) ||
+      (cfg->delay_us &&
+       (cfg->external_step_hz || cfg->mode != ADF4158_RAMP_SAWTOOTH)) ||
       cfg->pll.frequency_hz > 6100000000ULL - cfg->bandwidth_hz) {
     last_status = ADF4158_STATUS_INVALID_CONFIG;
     return false;
@@ -168,29 +172,34 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
     return false;
   }
 
-  // Ramp step period = CLK1 * CLK2 / fPFD.
-  uint64_t ticks = rounded_div((uint64_t)cfg->chirp_us * pfd_hz,
-                               (uint64_t)cfg->steps * 1000000ULL);
-
-  if (ticks == 0U || ticks > 4095ULL * 4095ULL) {
-    last_status = ADF4158_STATUS_RAMP_TIMING;
-    return false;
-  }
-
-  uint16_t clk1 = 0;
-  uint16_t clk2 = 0;
-
-  for (uint32_t c2 = 1U; c2 <= 4095U; ++c2) {
-    if (ticks % c2 == 0U && ticks / c2 <= 4095U) {
-      clk1 = (uint16_t)(ticks / c2);
-      clk2 = (uint16_t)c2;
-      break;
+  uint16_t clk1 = 1U;
+  uint16_t clk2 = 0U;
+  uint64_t step_ns;
+  uint64_t chirp_ns;
+  if (cfg->external_step_hz) {
+    step_ns = rounded_div(1000000000ULL, cfg->external_step_hz);
+    chirp_ns = rounded_div(cfg->steps * 1000000000ULL, cfg->external_step_hz);
+  } else {
+    /* Internal ramp step period = CLK1 * CLK2 / fPFD. */
+    uint64_t ticks = rounded_div((uint64_t)cfg->chirp_us * pfd_hz,
+                                 (uint64_t)cfg->steps * 1000000ULL);
+    if (ticks == 0U || ticks > 4095ULL * 4095ULL) {
+      last_status = ADF4158_STATUS_RAMP_TIMING;
+      return false;
     }
-  }
-
-  if (clk1 == 0U) {
-    last_status = ADF4158_STATUS_RAMP_TIMING;
-    return false;
+    for (uint32_t c2 = 1U; c2 <= 4095U; ++c2) {
+      if (ticks % c2 == 0U && ticks / c2 <= 4095U) {
+        clk1 = (uint16_t)(ticks / c2);
+        clk2 = (uint16_t)c2;
+        break;
+      }
+    }
+    if (clk2 == 0U) {
+      last_status = ADF4158_STATUS_RAMP_TIMING;
+      return false;
+    }
+    step_ns = rounded_div(ticks * 1000000000ULL, pfd_hz);
+    chirp_ns = rounded_div(ticks * cfg->steps * 1000000000ULL, pfd_hz);
   }
 
   uint32_t r0, r1, r2;
@@ -256,9 +265,15 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
   uint32_t r3 =
       ((uint32_t)cfg->mode << 10) | ((uint32_t)cfg->pll.positive_pd << 6) | 3U;
 
-  uint32_t r4 = (3U << 19) | ((uint32_t)clk2 << 7) | 4U;
-
+  uint32_t r4 = 4U;
   uint32_t r5 = ((uint32_t)best_offset << 19) | ((uint32_t)best_dev << 3) | 5U;
+  if (cfg->external_step_hz) {
+    /* Align INT and FRAC loading at integer boundaries (ADF4158 N SEL). */
+    r3 |= ADF4158_SYNC_N_WORD;
+    r5 |= ADF4158_TX_RAMP_CLK;
+  } else {
+    r4 |= (3U << 19) | ((uint32_t)clk2 << 7);
+  }
 
   uint32_t r6 = (cfg->steps << 3) | 6U;
 
@@ -275,10 +290,8 @@ bool adf4158_program_ramp(const adf4158_ramp_config_t *cfg,
     result->bandwidth_hz =
         (uint32_t)rounded_div(actual_step * cfg->steps, ADF4158_MODULUS);
 
-    result->step_ns = rounded_div(ticks * 1000000000ULL, pfd_hz);
-
-    result->chirp_ns = rounded_div(ticks * cfg->steps * 1000000000ULL, pfd_hz);
-
+    result->step_ns = step_ns;
+    result->chirp_ns = chirp_ns;
     result->delay_ns = rounded_div(delay_word * clk1 * 1000000000ULL, pfd_hz);
 
     result->interval_ns = result->chirp_ns + result->delay_ns;

@@ -59,6 +59,8 @@ bq25883_status_t bq25883_set_charge_enabled(bool enable);
 bq25883_status_t bq25883_set_charge_voltage_mv(uint16_t mv);
 bq25883_status_t bq25883_set_charge_current_ma(uint16_t ma);
 bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma);
+/* Verify the input limit and charger setting before releasing CE. */
+bq25883_status_t bq25883_apply_usb_current(uint16_t input_ma, bool charging);
 bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma);
 /* Starts and waits for a fresh one-shot ADC conversion. */

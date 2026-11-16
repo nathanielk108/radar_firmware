@@ -11,16 +11,38 @@
 #define BQ25883_REG_PRE_TERM 0x04U
 #define BQ25883_REG_CTRL1 0x05U
 #define BQ25883_REG_CTRL2 0x06U
+#define BQ25883_REG_JEITA 0x08U
 #define BQ25883_REG_STATUS1 0x0BU
 #define BQ25883_REG_ADC_CTRL 0x15U
 #define BQ25883_REG_IBUS_H 0x17U
 #define BQ25883_REG_PART_INFO 0x25U
 
 #define BQ25883_WATCHDOG_MASK (3U << 4)
+#define BQ25883_TERMINATION_ENABLE (1U << 7)
+#define BQ25883_SAFETY_TIMER_ENABLE (1U << 3)
+#define BQ25883_SAFETY_TIMER_MASK (3U << 1)
+#define BQ25883_SAFETY_TIMER_12_HOURS (2U << 1)
 #define BQ25883_OTG_ENABLE (1U << 7)
+#define BQ25883_AUTO_INPUT_DETECT (1U << 6)
+#define BQ25883_THERMAL_REGULATION_MASK (3U << 4)
+#define BQ25883_THERMAL_REGULATION_80C (1U << 4)
 #define BQ25883_CHARGE_ENABLE (1U << 3)
+#define BQ25883_JEITA_WARM_VOLTAGE_MASK (3U << 3)
+#define BQ25883_JEITA_COOL_CURRENT_MASK 3U
+#define BQ25883_JEITA_COOL_CURRENT_20_PERCENT 1U
+#define BQ25883_ILIM_ENABLE (1U << 6)
+#define BQ25883_FORCE_ICO (1U << 7)
+#define BQ25883_FORCE_INPUT_DETECT (1U << 6)
+#define BQ25883_ICO_ENABLE (1U << 5)
+#define BQ25883_IINDPM_MASK 0x1FU
 #define BQ25883_ADC_ENABLE (1U << 7)
 #define BQ25883_ADC_ONE_SHOT (1U << 6)
+
+/* Dantona L74A34-2-1-2W, protected 3400 mAh 2S1P Li-ion.
+ * Use the lower of Dantona's 1 A and 1.5 A family charger ratings.
+ */
+#define BATTERY_CHARGE_VOLTAGE_MV 8200U
+#define BATTERY_FAST_CHARGE_MA 1000U
 
 static bq25883_status_t map_i2c_status(i2c_status_t status) {
   switch (status) {
@@ -147,9 +169,10 @@ bq25883_status_t bq25883_set_charge_enabled(bool enable) {
   /* Never assert active-low CE until the register write is verified. */
   board_battery_charge_inhibit(true);
 
-  bq25883_status_t status =
-      bq25883_update_bits(BQ25883_REG_CTRL2, BQ25883_CHARGE_ENABLE,
-                          enable ? BQ25883_CHARGE_ENABLE : 0U);
+  bq25883_status_t status = bq25883_update_bits(
+      BQ25883_REG_CTRL2,
+      BQ25883_OTG_ENABLE | BQ25883_AUTO_INPUT_DETECT | BQ25883_CHARGE_ENABLE,
+      enable ? BQ25883_CHARGE_ENABLE : 0U);
   if (status != BQ25883_OK)
     return status;
 
@@ -182,7 +205,18 @@ bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma) {
   }
 
   uint8_t code = (uint8_t)((ma - 500U) / 100U);
-  return bq25883_update_bits(BQ25883_REG_IINDPM, 0x1FU, code);
+  /* CC defines the USB limit. Keep the independent hardware ILIM cap. */
+  return bq25883_write_verify(BQ25883_REG_IINDPM, code,
+                              BQ25883_FORCE_ICO | BQ25883_FORCE_INPUT_DETECT |
+                                  BQ25883_ICO_ENABLE | BQ25883_IINDPM_MASK);
+}
+
+bq25883_status_t bq25883_apply_usb_current(uint16_t input_ma, bool charging) {
+  board_battery_charge_inhibit(true);
+  bq25883_status_t status = bq25883_set_input_current_limit_ma(input_ma);
+  if (status != BQ25883_OK)
+    return status;
+  return bq25883_set_charge_enabled(charging);
 }
 
 bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
@@ -276,25 +310,48 @@ bq25883_status_t bq25883_init(void) {
   if (status != BQ25883_OK)
     return status;
 
-  status = bq25883_update_bits(BQ25883_REG_CTRL2,
-                               BQ25883_OTG_ENABLE | BQ25883_CHARGE_ENABLE, 0U);
+  /* The charger's D+/D- pins are unwired. Prevent it overriding the CC limit.
+   */
+  status = bq25883_set_charge_enabled(false);
   if (status != BQ25883_OK)
     return status;
-  status = bq25883_update_bits(BQ25883_REG_CTRL1, BQ25883_WATCHDOG_MASK, 0U);
+  status = bq25883_update_bits(
+      BQ25883_REG_CTRL1,
+      BQ25883_WATCHDOG_MASK | BQ25883_TERMINATION_ENABLE |
+          BQ25883_SAFETY_TIMER_ENABLE | BQ25883_SAFETY_TIMER_MASK,
+      BQ25883_TERMINATION_ENABLE | BQ25883_SAFETY_TIMER_ENABLE |
+          BQ25883_SAFETY_TIMER_12_HOURS);
+  if (status != BQ25883_OK)
+    return status;
+  status =
+      bq25883_update_bits(BQ25883_REG_CTRL2, BQ25883_THERMAL_REGULATION_MASK,
+                          BQ25883_THERMAL_REGULATION_80C);
   if (status != BQ25883_OK)
     return status;
 
-  /* Retain the bring-up limits with charging disabled. */
+  /* The pack thermistor is on J4. Warm VSET = 0 suspends charge. */
+  status = bq25883_update_bits(BQ25883_REG_JEITA,
+                               BQ25883_JEITA_WARM_VOLTAGE_MASK |
+                                   BQ25883_JEITA_COOL_CURRENT_MASK,
+                               BQ25883_JEITA_COOL_CURRENT_20_PERCENT);
+  if (status != BQ25883_OK)
+    return status;
+
+  /* Start at the minimum USB input limit until CC qualification. */
   status = bq25883_set_input_current_limit_ma(500U);
   if (status != BQ25883_OK)
     return status;
-  status = bq25883_set_charge_current_ma(500U);
+  status = bq25883_update_bits(BQ25883_REG_ICHG, BQ25883_ILIM_ENABLE,
+                               BQ25883_ILIM_ENABLE);
+  if (status != BQ25883_OK)
+    return status;
+  status = bq25883_set_charge_current_ma(BATTERY_FAST_CHARGE_MA);
   if (status != BQ25883_OK)
     return status;
   status = bq25883_set_precharge_termination_ma(50U, 50U);
   if (status != BQ25883_OK)
     return status;
-  status = bq25883_set_charge_voltage_mv(8200U);
+  status = bq25883_set_charge_voltage_mv(BATTERY_CHARGE_VOLTAGE_MV);
   if (status != BQ25883_OK)
     return status;
   return bq25883_write_verify(BQ25883_REG_ADC_CTRL, BQ25883_ADC_ONE_SHOT,

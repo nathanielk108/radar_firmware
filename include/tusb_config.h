@@ -15,6 +15,7 @@
 
 #define CFG_TUD_CDC_RX_BUFSIZE 64
 #define CFG_TUD_CDC_TX_BUFSIZE 64
-#define CFG_TUD_VBUS_DETECT_HW 1
+/* The board qualifies VBUS through the BQ25883 power-good pin. */
+#define CFG_TUD_VBUS_DETECT_HW 0
 
 #define CFG_TUD_DWC2_DMA_ENABLE 0

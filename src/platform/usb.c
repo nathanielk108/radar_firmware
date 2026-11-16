@@ -26,13 +26,7 @@ bool usb_init(void) {
   RCC->AHB1ENR |= RCC_AHB1ENR_USB2OTGFSEN;
   (void)RCC->AHB1ENR;
   NVIC_SetPriority(OTG_FS_IRQn, 5U);
-  NVIC_ClearPendingIRQ(OTG_FS_IRQn);
-
-  const tusb_rhport_init_t init = {
-      .role = TUSB_ROLE_DEVICE,
-      .speed = TUSB_SPEED_FULL,
-  };
-  return tusb_init(0U, &init);
+  return true;
 }
 
 void OTG_FS_IRQHandler(void) { tusb_int_handler(0U, true); }
@@ -62,6 +56,24 @@ bool usb_console_write_bytes(const char *data, size_t length) {
 }
 
 void usb_task(void) {
+  if (!board_usb_vbus_present()) {
+    if (tud_inited())
+      (void)tusb_deinit(0U);
+    return;
+  }
+
+  if (!tud_inited()) {
+    const tusb_rhport_init_t init = {
+        .role = TUSB_ROLE_DEVICE,
+        .speed = TUSB_SPEED_FULL,
+    };
+    NVIC_ClearPendingIRQ(OTG_FS_IRQn);
+    if (!tusb_init(0U, &init)) {
+      (void)tusb_deinit(0U);
+      return;
+    }
+  }
+
   tud_task();
   if (!tud_cdc_connected())
     return;
@@ -87,9 +99,13 @@ void usb_task(void) {
 }
 
 uint32_t usb_console_read(char *buffer, uint32_t len) {
-  if (!buffer || !len)
+  if (!buffer || !len || !tud_inited())
     return 0U;
   return tud_cdc_read(buffer, len);
 }
 
-bool usb_console_connected(void) { return tud_cdc_connected(); }
+bool usb_console_connected(void) { return tud_inited() && tud_cdc_connected(); }
+
+bool usb_configured_power_available(void) {
+  return tud_inited() && tud_mounted() && !tud_suspended();
+}

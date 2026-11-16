@@ -13,10 +13,10 @@ const adf4158_ramp_config_t board_adf4158_ramp = {
             .prescaler_8_9 = true,
             .positive_pd = true},
     .bandwidth_hz = 150000000U,
-    .chirp_us = 150U,
-    .delay_us = 631U,
-    .steps = 150U,
-    .mode = ADF4158_RAMP_SAWTOOTH};
+    .steps = 120U,
+    .mode = ADF4158_RAMP_SINGLE,
+    .external_step_hz = 800000U,
+};
 
 const adf4158_fixed_config_t board_adf4158_fixed = {
     .reference_hz = 10000000U,
@@ -41,8 +41,17 @@ void board_freq_init(void) {
   board_gpio_pin(FREQ_DATA_PORT, FREQ_DATA_PIN, LL_GPIO_MODE_OUTPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_MEDIUM, 0U, false);
+  board_freq_hold_txdata_low();
+}
 
+void board_freq_hold_txdata_low(void) {
   board_gpio_pin(FREQ_TXDATA_PORT, FREQ_TXDATA_PIN, LL_GPIO_MODE_OUTPUT,
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_LOW, 0U, false);
+}
+
+void board_freq_use_txdata_timer(void) {
+  board_gpio_pin(FREQ_TXDATA_PORT, FREQ_TXDATA_PIN, LL_GPIO_MODE_ALTERNATE,
+                 LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
+                 LL_GPIO_SPEED_FREQ_HIGH, FREQ_TXDATA_AF, false);
 }

@@ -31,10 +31,18 @@
 #define USB_DATA_AF 10U
 #define USB_VBUS_PORT GPIOA
 #define USB_VBUS_PIN 9U
+#define USB_CC_PORT GPIOF
+#define USB_CC1_PIN 12U
+#define USB_CC2_PIN 11U
 
 #define DEBUG_SWO_PORT GPIOB
 #define DEBUG_SWO_PIN 3U
 #define DEBUG_SWO_AF 0U
+
+// VGA gain control
+
+#define GAIN_DAC_PORT GPIOA
+#define GAIN_DAC_PIN 4U
 
 // SPI
 
