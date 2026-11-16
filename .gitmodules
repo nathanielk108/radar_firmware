@@ -1,12 +1,16 @@
 [submodule "vendor/CMSIS-DSP"]
 	path = vendor/CMSIS-DSP
 	url = https://github.com/ARM-software/CMSIS-DSP.git
+	ignore = dirty
 [submodule "vendor/tinyusb"]
 	path = vendor/tinyusb
 	url = https://github.com/hathach/tinyusb
+	ignore = dirty
 [submodule "vendor/printf"]
 	path = vendor/printf
 	url = https://github.com/mpaland/printf.git
+	ignore = dirty
 [submodule "vendor/STM32CubeH7"]
 	path = vendor/STM32CubeH7
 	url = https://github.com/STMicroelectronics/STM32CubeH7.git
+	ignore = dirty

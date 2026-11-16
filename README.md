@@ -112,10 +112,14 @@ transaction.
 Install Arm GNU Toolchain, CMake and Ninja, then run:
 
 ```sh
-git submodule update --init --recursive -- vendor/STM32CubeH7 vendor/tinyusb
+git submodule update --init -- vendor/STM32CubeH7 vendor/tinyusb
+git -C vendor/STM32CubeH7 submodule update --init -- Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
 cmake --preset Debug
 cmake --build --preset Debug
 ```
+
+Top-level Git status and diff report changes to vendor commit pins. To see local
+edits in a vendor checkout, run `git -C vendor/tinyusb status` for that checkout.
 
 The ELF, BIN, HEX and map files are under `build/Debug`. The preset uses USB for
 boot logs. Use `-DPRINTF_OUT=BOTH` when configuring to send them to SWO as well.
