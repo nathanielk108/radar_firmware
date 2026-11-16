@@ -16,6 +16,7 @@ build
 **/__pycache__
 vendor/*
 *.zip
+docs/rm*.pdf
 
 # CLion
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
