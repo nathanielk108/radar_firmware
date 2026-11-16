@@ -118,7 +118,7 @@ transaction.
 Install Arm GNU Toolchain, CMake and Ninja, then run:
 
 ```sh
-git submodule update --init -- vendor/STM32CubeH7 vendor/tinyusb
+git submodule update --init -- vendor/STM32CubeH7 vendor/tinyusb vendor/CMSIS-DSP
 git -C vendor/STM32CubeH7 submodule update --init -- Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver Middlewares/Third_Party/FatFs
 cmake --preset Debug
 cmake --build --preset Debug

@@ -9,6 +9,11 @@ find_program(CMAKE_C_COMPILER
   REQUIRED
 )
 
+find_program(CMAKE_CXX_COMPILER
+  NAMES arm-none-eabi-g++
+  REQUIRED
+)
+
 find_program(CMAKE_ASM_COMPILER
   NAMES arm-none-eabi-gcc
   REQUIRED

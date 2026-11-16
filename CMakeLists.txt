@@ -22,12 +22,13 @@ set(CMSIS_DEVICE ${CMSIS_CORE}/Device/ST/STM32H7xx)
 set(STM32_HAL_DRIVER ${STM32CUBE_H7}/Drivers/STM32H7xx_HAL_Driver)
 set(STM32_HAL_DRIVER_INC ${STM32_HAL_DRIVER}/Inc)
 set(FATFS ${STM32CUBE_H7}/Middlewares/Third_Party/FatFs/src)
+set(CMSIS_DSP ${PROJECT_ROOT}/vendor/CMSIS-DSP)
 if(NOT EXISTS "${STM32_HAL_DRIVER_INC}/stm32h7xx_ll_gpio.h"
    OR NOT EXISTS "${CMSIS_DEVICE}/Include/stm32h7xx.h")
   message(FATAL_ERROR "STM32CubeH7 CMSIS/LL headers missing under ${STM32CUBE_H7}")
 endif()
-if(NOT EXISTS "${FATFS}/ff.c")
-  message(FATAL_ERROR "Initialize the FatFs submodule as shown in README.md")
+if(NOT EXISTS "${FATFS}/ff.c" OR NOT EXISTS "${CMSIS_DSP}/Source/CMakeLists.txt")
+  message(FATAL_ERROR "Initialize the FatFs and CMSIS-DSP submodules as shown in README.md")
 endif()
 
 set(LINKER_SCRIPT
@@ -115,6 +116,16 @@ set(MCU_FLAGS
   -mfpu=fpv5-d16
   -mfloat-abi=hard
 )
+
+set(CMSISCORE ${CMSIS_CORE}/Core)
+set(CMSISDSP_INSTALL OFF)
+set(DISABLEFLOAT16 ON)
+set(FASTBUILD ON)
+add_subdirectory(${CMSIS_DSP}/Source cmsis-dsp EXCLUDE_FROM_ALL)
+target_compile_options(CMSISDSP PRIVATE
+  ${MCU_FLAGS} -O3 -ffunction-sections -fdata-sections
+)
+target_link_libraries(radar_firmware PRIVATE CMSISDSP m)
 
 target_compile_options(radar_firmware PRIVATE
   ${MCU_FLAGS}
