@@ -5,6 +5,7 @@
 
 #define DISPLAY_WIDTH 240U
 #define DISPLAY_HEIGHT 320U
+#define DISPLAY_BRIGHTNESS_MAX 100U
 
 typedef enum {
   DISPLAY_OK,
@@ -19,6 +20,10 @@ typedef enum {
 display_status_t display_enable(bool enabled);
 bool display_enabled(void);
 const char *display_status_name(display_status_t status);
+
+/* The brightness setting is kept while the display is off. */
+display_status_t display_set_brightness(uint8_t percent);
+uint8_t display_brightness(void);
 
 display_status_t display_fill(uint16_t x, uint16_t y, uint16_t width,
                               uint16_t height, uint16_t rgb565);

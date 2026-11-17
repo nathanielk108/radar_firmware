@@ -14,3 +14,9 @@ void board_i2c_batt_init(void) {
                  LL_GPIO_OUTPUT_OPENDRAIN, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_HIGH, BATT_SDA_AF, false);
 }
+
+void board_i2c_batt_reset(void) {
+  LL_APB4_GRP1_ForceReset(LL_APB4_GRP1_PERIPH_I2C4);
+  LL_APB4_GRP1_ReleaseReset(LL_APB4_GRP1_PERIPH_I2C4);
+  (void)i2c_init(&batt_i2c_config);
+}

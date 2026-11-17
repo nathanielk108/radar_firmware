@@ -119,13 +119,15 @@ static void status_command(void) {
   firmware_status_t system = firmware_status();
   recording_status_t log = recording_status();
   reply("uptime=%lu ms usb=%s vbus=%u charging_allowed=%u efuse_pg=%u "
-        "imu1=%u imu2=%u radar=%u lcd=%u sd_present=%u sd_mounted=%u",
+        "imu1=%u imu2=%u radar=%u lcd=%u sd_present=%u sd_mounted=%u "
+        "5v_en=%u 15v_en=%u",
         (unsigned long)time_ms(), system.usb_ready ? "ready" : "unavailable",
         (unsigned)system.vbus_present, (unsigned)!system.charge_inhibited,
         (unsigned)system.efuse_power_good, (unsigned)motion_ready(MOTION_ISM330IS),
         (unsigned)motion_ready(MOTION_BMI323), (unsigned)system.radar_ready,
         (unsigned)display_enabled(), (unsigned)storage_present(),
-        (unsigned)storage_mounted());
+        (unsigned)storage_mounted(), (unsigned)system.rail_5v_enabled,
+        (unsigned)system.rail_15v_enabled);
   reply("sd_saved=%lu pending=%u dropped=%lu log_dropped=%lu io_errors=%lu "
         "last_error=%s last_file=%s",
         (unsigned long)log.captures_saved, (unsigned)log.captures_pending,
@@ -138,13 +140,33 @@ static void status_command(void) {
 static void power_command(void) {
   firmware_status_t system = firmware_status();
   usb_charge_status_t charger = usb_charge_status();
+  const char *battery = charger.battery_presence == USB_BATTERY_PRESENT ? "present"
+                        : charger.battery_presence == USB_BATTERY_ABSENT ? "absent"
+                                                                        : "unknown";
   reply("vbus=%u efuse_pg=%u charger_ready=%u update_failed=%u "
-        "cc1_mv=%u cc2_mv=%u advertised_ma=%u input_limit_ma=%u inhibited=%u",
+        "cc1_mv=%u cc2_mv=%u advertised_ma=%u input_limit_ma=%u "
+        "inhibited=%u battery=%s",
         (unsigned)system.vbus_present, (unsigned)system.efuse_power_good,
         (unsigned)charger.ready, (unsigned)charger.update_failed,
         (unsigned)charger.cc1_mv, (unsigned)charger.cc2_mv,
         (unsigned)charger.advertised_ma, (unsigned)charger.input_limit_ma,
-        (unsigned)system.charge_inhibited);
+        (unsigned)system.charge_inhibited, battery);
+}
+
+static void power_adc_command(void) {
+  bq25883_snapshot_t adc;
+  uint32_t age_ms;
+  if (!usb_charge_get_snapshot(&adc, &age_ms)) {
+    reply("BQ25883 ADC: no recent measurement");
+    return;
+  }
+  reply("BQ25883 ADC age_ms=%lu vbus_mv=%u vbat_mv=%u vsys_mv=%u "
+        "ibus_ma=%d ichg_ma=%u ts_permille=%d tdie_mc=%ld "
+        "charge_state=%u ts_status=%u fault=0x%02X",
+        (unsigned long)age_ms, (unsigned)adc.vbus_mv, (unsigned)adc.vbat_mv,
+        (unsigned)adc.vsys_mv, (int)adc.ibus_ma, (unsigned)adc.ichg_ma,
+        (int)adc.ts_permille, (long)adc.tdie_half_c * 500L,
+        (unsigned)adc.charge_state, (unsigned)adc.ts_status, (unsigned)adc.fault);
 }
 
 static void motion_command(motion_sensor_t sensor, const char *name) {
@@ -299,6 +321,40 @@ static bool parse_unsigned(const char *value, uint32_t max, uint32_t *result) {
   return true;
 }
 
+static void rails_command(const char *arg) {
+  if (arg) {
+    firmware_rail_mode_t mode;
+    if (!strcmp(arg, "off"))
+      mode = FIRMWARE_RAILS_OFF;
+    else if (!strcmp(arg, "5v"))
+      mode = FIRMWARE_RAILS_5V;
+    else if (!strcmp(arg, "on"))
+      mode = FIRMWARE_RAILS_ALL;
+    else {
+      reply("rails [5v|on|off]");
+      return;
+    }
+    if (!firmware_rails_set(mode)) {
+      reply("RAILS busy");
+      return;
+    }
+  }
+  firmware_status_t system = firmware_status();
+  reply("5v_en=%u 15v_en=%u", (unsigned)system.rail_5v_enabled,
+        (unsigned)system.rail_15v_enabled);
+}
+
+static void brightness_command(const char *arg) {
+  uint32_t percent;
+  if (arg && !parse_unsigned(arg, 100U, &percent)) {
+    reply("bl [0-100]");
+    return;
+  }
+  if (arg)
+    (void)display_set_brightness((uint8_t)percent);
+  reply("LCD backlight %u%%", (unsigned)display_brightness());
+}
+
 static void dispatch(char *command) {
   if (!strncmp(command, "echo ", 5U)) {
     reply("%s", command + 5U);
@@ -310,24 +366,38 @@ static void dispatch(char *command) {
   char *arg = strtok(NULL, " \t");
   char *extra = strtok(NULL, " \t");
   if (!strcmp(name, "help") && !arg) {
-    reply("status | power | imu [1|2] | rf on|off | g [mV] | c | "
+    reply("status | power [adc] | rails [5v|on|off] | imu [1|2] | "
+          "rf on|off | g [mV] | c | "
           "save [chirps [interval_us]] | sd mount|eject|test | "
-          "test adc|stream|dsp|lcd | lcd off | echo <text>");
+          "test adc|stream|dsp|lcd | lcd off | bl [0-100] | echo <text>");
     return;
   }
   if (!strcmp(name, "status") && !arg) {
     status_command();
     return;
   }
-  if (!strcmp(name, "power") && !arg) {
-    power_command();
+  if (!strcmp(name, "power") && !extra) {
+    if (!arg)
+      power_command();
+    else if (!strcmp(arg, "adc"))
+      power_adc_command();
+    else
+      reply("power [adc]");
+    return;
+  }
+  if (!strcmp(name, "rails") && !arg) {
+    rails_command(NULL);
     return;
   }
   if (capture_active()) {
     reply("RADAR busy");
     return;
   }
-  if (!strcmp(name, "g") && !extra) {
+  if (!strcmp(name, "rails") && !extra) {
+    rails_command(arg);
+  } else if (!strcmp(name, "bl") && !extra) {
+    brightness_command(arg);
+  } else if (!strcmp(name, "g") && !extra) {
     uint32_t value;
     uint16_t millivolts;
     if (!firmware_gain_get(&millivolts))
@@ -386,8 +456,7 @@ static void dispatch(char *command) {
     }
 #if defined(FIRMWARE_DEBUG)
     else if (!strcmp(arg, "fault")) {
-      (void)firmware_rf_enable(false);
-      (void)display_enable(false);
+      (void)firmware_rails_set(FIRMWARE_RAILS_OFF);
       fault_test_usage();
     }
 #endif

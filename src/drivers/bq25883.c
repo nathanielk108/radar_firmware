@@ -7,6 +7,7 @@
 #define BQ25883_I2C_ADDRESS 0x6BU
 #define BQ25883_REG_VREG 0x00U
 #define BQ25883_REG_ICHG 0x01U
+#define BQ25883_REG_VINDPM 0x02U
 #define BQ25883_REG_IINDPM 0x03U
 #define BQ25883_REG_PRE_TERM 0x04U
 #define BQ25883_REG_CTRL1 0x05U
@@ -27,6 +28,8 @@
 #define BQ25883_THERMAL_REGULATION_MASK (3U << 4)
 #define BQ25883_THERMAL_REGULATION_80C (1U << 4)
 #define BQ25883_CHARGE_ENABLE (1U << 3)
+#define BQ25883_RECHARGE_MASK 3U
+#define BQ25883_RECHARGE_200_MV 1U
 #define BQ25883_JEITA_WARM_VOLTAGE_MASK (3U << 3)
 #define BQ25883_JEITA_COOL_CURRENT_MASK 3U
 #define BQ25883_JEITA_COOL_CURRENT_20_PERCENT 1U
@@ -35,14 +38,19 @@
 #define BQ25883_FORCE_INPUT_DETECT (1U << 6)
 #define BQ25883_ICO_ENABLE (1U << 5)
 #define BQ25883_IINDPM_MASK 0x1FU
+#define BQ25883_BAT_DISCHARGE (1U << 6)
 #define BQ25883_ADC_ENABLE (1U << 7)
 #define BQ25883_ADC_ONE_SHOT (1U << 6)
+#define BQ25883_ADC_TIMEOUT_MS 250U
+#define BQ25883_SAFETY_TIMER_EXPIRED (1U << 4)
 
 /* Dantona L74A34-2-1-2W, protected 3400 mAh 2S1P Li-ion.
  * Use the lower of Dantona's 1 A and 1.5 A family charger ratings.
  */
-#define BATTERY_CHARGE_VOLTAGE_MV 8200U
 #define BATTERY_FAST_CHARGE_MA 1000U
+
+static bool adc_pending;
+static uint32_t adc_started_ms;
 
 static bq25883_status_t map_i2c_status(i2c_status_t status) {
   switch (status) {
@@ -80,7 +88,9 @@ const char *bq25883_status_name(bq25883_status_t status) {
   case BQ25883_ERROR_VERIFY:
     return "register verify failed";
   case BQ25883_ERROR_ADC:
-    return "ADC conversion did not start";
+    return "ADC conversion unavailable";
+  case BQ25883_ERROR_ADC_TIMEOUT:
+    return "ADC conversion deadline missed";
   case BQ25883_ERROR_INVALID_ARGUMENT:
     return "invalid argument";
   case BQ25883_ERROR_NACK:
@@ -219,6 +229,11 @@ bq25883_status_t bq25883_apply_usb_current(uint16_t input_ma, bool charging) {
   return bq25883_set_charge_enabled(charging);
 }
 
+bq25883_status_t bq25883_set_battery_discharge(bool enable) {
+  return bq25883_update_bits(BQ25883_REG_VINDPM, BQ25883_BAT_DISCHARGE,
+                             enable ? BQ25883_BAT_DISCHARGE : 0U);
+}
+
 bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma) {
   if ((precharge_ma < 50U) || (precharge_ma > 800U) || (termination_ma < 50U) ||
@@ -235,8 +250,14 @@ bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
   return bq25883_write_verify(BQ25883_REG_PRE_TERM, value, 0xFFU);
 }
 
-static bq25883_status_t bq25883_adc_sample(void) {
-  bq25883_status_t status = bq25883_write_reg(
+bq25883_status_t bq25883_adc_start(void) {
+  adc_pending = false;
+  /* End any conversion left pending by a USB detach or a bus error. */
+  bq25883_status_t status =
+      bq25883_write_reg(BQ25883_REG_ADC_CTRL, BQ25883_ADC_ONE_SHOT);
+  if (status != BQ25883_OK)
+    return status;
+  status = bq25883_write_reg(
       BQ25883_REG_ADC_CTRL, BQ25883_ADC_ENABLE | BQ25883_ADC_ONE_SHOT);
   if (status != BQ25883_OK)
     return status;
@@ -248,29 +269,35 @@ static bq25883_status_t bq25883_adc_sample(void) {
     return status;
   if ((adc_control & BQ25883_ADC_ENABLE) == 0U)
     return BQ25883_ERROR_ADC;
-
-  uint32_t start = time_ms();
-  do {
-    time_delay_ms(1U);
-    status = bq25883_read_reg(BQ25883_REG_ADC_CTRL, &adc_control);
-    if (status != BQ25883_OK)
-      return status;
-    if ((adc_control & BQ25883_ADC_ENABLE) == 0U)
-      return BQ25883_OK;
-  } while (!time_expired(start, 250U));
-  return BQ25883_ERROR_TIMEOUT;
+  adc_started_ms = time_ms();
+  adc_pending = true;
+  return BQ25883_OK;
 }
 
 static uint16_t adc_word(const uint8_t *data) {
   return ((uint16_t)data[0] << 8) | data[1];
 }
 
-bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *snapshot) {
-  if (!snapshot)
+bq25883_status_t bq25883_adc_poll(bq25883_snapshot_t *snapshot, bool *complete) {
+  if (!snapshot || !complete)
     return BQ25883_ERROR_INVALID_ARGUMENT;
-  bq25883_status_t status = bq25883_adc_sample();
-  if (status != BQ25883_OK)
+  *complete = false;
+  if (!adc_pending)
+    return BQ25883_ERROR_ADC;
+
+  uint8_t adc_control;
+  bq25883_status_t status = bq25883_read_reg(BQ25883_REG_ADC_CTRL, &adc_control);
+  if (status != BQ25883_OK) {
+    adc_pending = false;
     return status;
+  }
+  if (adc_control & BQ25883_ADC_ENABLE) {
+    if (!time_expired(adc_started_ms, BQ25883_ADC_TIMEOUT_MS))
+      return BQ25883_OK;
+    adc_pending = false;
+    return BQ25883_ERROR_ADC_TIMEOUT;
+  }
+  adc_pending = false;
 
   uint8_t flags[4];
   status = bq25883_read(BQ25883_REG_STATUS1, flags, sizeof(flags));
@@ -294,18 +321,34 @@ bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *snapshot) {
       .input_current_limited = (flags[0] & (1U << 6)) != 0U,
       .power_good = (flags[1] & (1U << 7)) != 0U,
       .ts_status = flags[2] & 0x07U,
+      .safety_timer_expired = (flags[3] & BQ25883_SAFETY_TIMER_EXPIRED) != 0U,
       .ibus_ma = (int16_t)adc_word(&adc[0]),
       .ichg_ma = adc_word(&adc[2]),
       .vbus_mv = adc_word(&adc[4]),
       .vbat_mv = adc_word(&adc[6]),
       .vsys_mv = adc_word(&adc[8]),
+      .ts_permille = (int16_t)((int32_t)(int16_t)adc_word(&adc[10]) * 1000 / 1024),
       .tdie_half_c = (int16_t)adc_word(&adc[12]),
   };
+  *complete = true;
   return BQ25883_OK;
+}
+
+bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *snapshot) {
+  if (!snapshot)
+    return BQ25883_ERROR_INVALID_ARGUMENT;
+  bq25883_status_t status = bq25883_adc_start();
+  bool complete = false;
+  while (status == BQ25883_OK && !complete) {
+    time_delay_ms(1U);
+    status = bq25883_adc_poll(snapshot, &complete);
+  }
+  return status;
 }
 
 bq25883_status_t bq25883_init(void) {
   board_battery_charge_inhibit(true);
+  adc_pending = false;
   bq25883_status_t status = bq25883_check_id(NULL);
   if (status != BQ25883_OK)
     return status;
@@ -313,6 +356,9 @@ bq25883_status_t bq25883_init(void) {
   /* The charger's D+/D- pins are unwired. Prevent it overriding the CC limit.
    */
   status = bq25883_set_charge_enabled(false);
+  if (status != BQ25883_OK)
+    return status;
+  status = bq25883_set_battery_discharge(false);
   if (status != BQ25883_OK)
     return status;
   status = bq25883_update_bits(
@@ -324,8 +370,9 @@ bq25883_status_t bq25883_init(void) {
   if (status != BQ25883_OK)
     return status;
   status =
-      bq25883_update_bits(BQ25883_REG_CTRL2, BQ25883_THERMAL_REGULATION_MASK,
-                          BQ25883_THERMAL_REGULATION_80C);
+      bq25883_update_bits(BQ25883_REG_CTRL2,
+                          BQ25883_THERMAL_REGULATION_MASK | BQ25883_RECHARGE_MASK,
+                          BQ25883_THERMAL_REGULATION_80C | BQ25883_RECHARGE_200_MV);
   if (status != BQ25883_OK)
     return status;
 
@@ -351,7 +398,7 @@ bq25883_status_t bq25883_init(void) {
   status = bq25883_set_precharge_termination_ma(50U, 50U);
   if (status != BQ25883_OK)
     return status;
-  status = bq25883_set_charge_voltage_mv(BATTERY_CHARGE_VOLTAGE_MV);
+  status = bq25883_set_charge_voltage_mv(BQ25883_BOARD_CHARGE_VOLTAGE_MV);
   if (status != BQ25883_OK)
     return status;
   return bq25883_write_verify(BQ25883_REG_ADC_CTRL, BQ25883_ADC_ONE_SHOT,

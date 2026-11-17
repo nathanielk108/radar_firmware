@@ -5,9 +5,10 @@
 void board_power_init(void);
 void board_rf_power_on(void);
 void board_rf_power_off(void);
-
-void board_rf_5v_enable(bool enable);
-void board_rf_15v_enable(bool enable);
+void board_lcd_power_enable(bool enable);
+void board_aux_power_enable(bool enable_5v, bool enable_15v);
+bool board_power_5v_enabled(void);
+bool board_power_15v_enabled(void);
 
 bool board_efuse_power_good(void);
 

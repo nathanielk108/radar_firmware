@@ -15,6 +15,7 @@
 #include "platform/usb.h"
 #include "services/acquisition.h"
 #include "services/chirp.h"
+#include "services/display.h"
 #include "services/motion.h"
 #include "services/storage.h"
 #include "services/usb_charge.h"
@@ -92,8 +93,20 @@ bool firmware_rf_enable(bool enable) {
   }
   board_rf_power_off();
   radar_ready = false;
-  LOG_INFO("RF rails off");
+  LOG_INFO("RF stopped; 5v_en=%u 15v_en=%u",
+           (unsigned)board_power_5v_enabled(), (unsigned)board_power_15v_enabled());
   return !enable;
+}
+
+bool firmware_rails_set(firmware_rail_mode_t mode) {
+  if ((unsigned)mode > FIRMWARE_RAILS_ALL || capture_active())
+    return false;
+  if (mode == FIRMWARE_RAILS_OFF)
+    (void)display_enable(false);
+  if (mode != FIRMWARE_RAILS_ALL)
+    (void)firmware_rf_enable(false);
+  board_aux_power_enable(mode != FIRMWARE_RAILS_OFF, mode == FIRMWARE_RAILS_ALL);
+  return true;
 }
 
 bool firmware_gain_get(uint16_t *millivolts) {
@@ -149,5 +162,7 @@ firmware_status_t firmware_status(void) {
                              .vbus_present = board_battery_power_good(),
                              .charge_inhibited = board_battery_charge_inhibited(),
                              .efuse_power_good = board_efuse_power_good(),
-                             .radar_ready = radar_ready};
+                             .radar_ready = radar_ready,
+                             .rail_5v_enabled = board_power_5v_enabled(),
+                             .rail_15v_enabled = board_power_15v_enabled()};
 }

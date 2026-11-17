@@ -33,12 +33,14 @@ The `c` single-chirp shortcut works without Enter.
 | Command | Behavior |
 | --- | --- |
 | `status`, `power`, `imu [1\|2]` | Read subsystem, USB-C/charger, and motion diagnostics. |
+| `power adc` | Read the latest BQ25883 ADC snapshot, including VBUS, VBAT, VSYS, IBUS, ICHG, thermistor ratio, die temperature, and sample age. |
+| `rails [5v\|on\|off]` | Read regulator enable states, enable just 5 V or both regulators for bench testing, or shut down both and disable the LCD and RF services. |
 | `rf on`, `rf off`, `g [mV]` | Probe or disable the RF board and configure IF gain. |
 | `c` | Send one chirp as USB CSV. Also queue the raw capture if SD is mounted. |
 | `save [chirps [interval_us]]` | Save one complete capture to SD. Train limits are 2–16 chirps at intervals of 500–10000 µs. The default interval is 1000 µs. |
 | `sd mount`, `sd test`, `sd eject` | Mount an existing FAT volume, write and read back a new scratch file, or flush and unmount. |
 | `test dsp`, `test adc`, `test stream` | Check the CMSIS-DSP real FFT, a finite ADC-only DMA capture, or one second of continuous ADC DMA with USB and charger tasks active. |
-| `test lcd`, `lcd off` | Draw RGB565 test bars on an attached panel or disable it. |
+| `test lcd`, `bl [0–100]`, `lcd off` | Draw solid RGB565 bars, read or set the backlight PWM duty in percent, or disable the panel. |
 | `echo <text>` | Check the CDC receive and transmit paths. |
 
 `test fault` deliberately triggers a UsageFault in Debug builds. Run it with a
@@ -82,12 +84,30 @@ are suspended. Charge termination and the 12-hour safety timer are enabled.
 The charger also reduces current at its 80 °C die-temperature setting.
 [BQ25883 datasheet](https://www.ti.com/lit/ds/symlink/bq25883.pdf)
 
+Charging starts only after a fresh loaded BAT-pin measurement confirms a
+plausible pack voltage with the J4 thermistor connected. The charger uses its
+internal discharge load briefly while CE is inhibited to distinguish the pack
+from the BAT-pin capacitor. During charging, firmware watches VBAT, the
+thermistor, and charger status. A completed charge is rechecked before recharge
+at 8.0 V. A missing or unconfirmed pack keeps charging inhibited while USB
+continues to power the system.
+
 Default-current sources enable charging after USB configuration and pause
 during USB suspend. Explicit 1.5 A and 3 A sources can charge without a data
 connection. A missing or ambiguous CC reading inhibits charging, and a lower
 advertisement reduces the limit promptly. The BQ25883 system power path
 remains available at its 500 mA minimum setting when charging is inhibited.
 The firmware reads the 5 V advertisement without negotiating USB-PD.
+
+## LCD bench power
+
+`test lcd` requests the shared 5 V backlight supply and works with the RF board
+disconnected. `bl 40` sets TIM4 CH1 on PD12 to 40% duty at 20 kHz. `bl` reads
+the setting, and 0% turns the backlight off. The setting lasts until reset.
+`lcd off` releases the LCD's 5 V request. An RF or manual request can keep the
+regulator enabled. `rails 5v` and `rails on` assert regulator enables without
+probing the RF board. `rails off` disables the panel and both regulator
+enables. The reported enable states reflect GPIO commands.
 
 ## IF gain
 

@@ -1,32 +1,49 @@
 #include "services/display.h"
 
 #include "board/board_display.h"
+#include "board/board_power.h"
 #include "drivers/st7789.h"
 
 _Static_assert(DISPLAY_WIDTH == ST7789_WIDTH && DISPLAY_HEIGHT == ST7789_HEIGHT,
                "Display geometry must match the installed panel");
 
 static bool active;
+static uint8_t brightness = DISPLAY_BRIGHTNESS_MAX;
 
 display_status_t display_enable(bool enabled) {
   if (enabled == active)
     return DISPLAY_OK;
   if (enabled) {
-    if (!board_display_bus_start())
+    board_lcd_power_enable(true);
+    if (!board_display_bus_start()) {
+      board_lcd_power_enable(false);
       return DISPLAY_UNAVAILABLE;
+    }
     st7789_init();
     st7789_fill(0U, 0U, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0U);
-    board_display_backlight(true);
+    board_display_backlight(brightness);
   } else {
-    board_display_backlight(false);
+    board_display_backlight(0U);
     board_display_reset(true);
     board_display_bus_stop();
+    board_lcd_power_enable(false);
   }
   active = enabled;
   return DISPLAY_OK;
 }
 
 bool display_enabled(void) { return active; }
+
+display_status_t display_set_brightness(uint8_t percent) {
+  if (percent > DISPLAY_BRIGHTNESS_MAX)
+    return DISPLAY_INVALID_ARGUMENT;
+  brightness = percent;
+  if (active)
+    board_display_backlight(brightness);
+  return DISPLAY_OK;
+}
+
+uint8_t display_brightness(void) { return brightness; }
 
 const char *display_status_name(display_status_t status) {
   switch (status) {
@@ -76,6 +93,5 @@ display_status_t display_test_pattern(void) {
   uint16_t width = DISPLAY_WIDTH / (sizeof(bars) / sizeof(bars[0]));
   for (unsigned i = 0; i < sizeof(bars) / sizeof(bars[0]); ++i)
     st7789_fill((uint16_t)(i * width), 0U, width, DISPLAY_HEIGHT, bars[i]);
-  st7789_fill(0U, 0U, 16U, 32U, 0xFFFFU);
   return DISPLAY_OK;
 }

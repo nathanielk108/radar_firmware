@@ -3,6 +3,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define BQ25883_BOARD_CHARGE_VOLTAGE_MV 8200U
+#define BQ25883_BOARD_RECHARGE_MV 8000U
+
 typedef enum {
   BQ25883_OK = 0,
   BQ25883_ERROR_I2C,
@@ -15,7 +18,8 @@ typedef enum {
   BQ25883_ERROR_NACK,
   BQ25883_ERROR_BUS,
   BQ25883_ERROR_ARBITRATION,
-  BQ25883_ERROR_OVERRUN
+  BQ25883_ERROR_OVERRUN,
+  BQ25883_ERROR_ADC_TIMEOUT
 } bq25883_status_t;
 
 typedef enum {
@@ -41,6 +45,7 @@ typedef struct {
   bool input_voltage_limited;
   bool thermal_regulation;
   bool watchdog_expired;
+  bool safety_timer_expired;
 
   uint8_t ts_status;
 
@@ -49,6 +54,7 @@ typedef struct {
   uint16_t vsys_mv;
   uint16_t ichg_ma;
   int16_t ibus_ma;
+  int16_t ts_permille;
   int16_t tdie_half_c;
 } bq25883_snapshot_t;
 
@@ -59,10 +65,15 @@ bq25883_status_t bq25883_set_charge_enabled(bool enable);
 bq25883_status_t bq25883_set_charge_voltage_mv(uint16_t mv);
 bq25883_status_t bq25883_set_charge_current_ma(uint16_t ma);
 bq25883_status_t bq25883_set_input_current_limit_ma(uint16_t ma);
+/* Applies the charger's small BAT-pin discharge load for presence checks. */
+bq25883_status_t bq25883_set_battery_discharge(bool enable);
 /* Verify the input limit and charger setting before releasing CE. */
 bq25883_status_t bq25883_apply_usb_current(uint16_t input_ma, bool charging);
 bq25883_status_t bq25883_set_precharge_termination_ma(uint16_t precharge_ma,
                                                       uint16_t termination_ma);
+/* Single foreground owner. Poll sets complete when a fresh snapshot is ready. */
+bq25883_status_t bq25883_adc_start(void);
+bq25883_status_t bq25883_adc_poll(bq25883_snapshot_t *snapshot, bool *complete);
 /* Starts and waits for a fresh one-shot ADC conversion. */
 bq25883_status_t bq25883_get_snapshot(bq25883_snapshot_t *s);
 
