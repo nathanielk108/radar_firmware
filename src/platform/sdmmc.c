@@ -51,14 +51,13 @@ void sdmmc_socket_init(void) {
                  LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_UP,
                  LL_GPIO_SPEED_FREQ_VERY_HIGH, STORAGE_SD_AF, true);
   board_gpio_pin(STORAGE_CD_PORT, STORAGE_CD_PIN, LL_GPIO_MODE_INPUT,
-                 LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_UP,
+                 LL_GPIO_OUTPUT_PUSHPULL, LL_GPIO_PULL_NO,
                  LL_GPIO_SPEED_FREQ_LOW, 0U, false);
   socket_ready = true;
 }
 
 bool sdmmc_present(void) {
-  return socket_ready &&
-         !LL_GPIO_IsInputPinSet(STORAGE_CD_PORT, 1UL << STORAGE_CD_PIN);
+  return socket_ready && LL_GPIO_IsInputPinSet(STORAGE_CD_PORT, 1UL << STORAGE_CD_PIN);
 }
 
 bool sdmmc_ready(void) { return card_ready && sdmmc_present(); }
