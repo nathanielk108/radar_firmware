@@ -163,6 +163,41 @@ SCLK together to measure the DMA start delay and ADC framing. Measure PLL
 settling and RF tracking to establish the effective slope and sampled
 bandwidth before interpreting a target measurement.
 
+## Offline MATLAB processing
+
+Run the current recordings through `scripts/analyze_fmcw.m` with base MATLAB
+R2020a or newer. From the repository root, run the following in MATLAB.
+
+```matlab
+run('scripts/analyze_fmcw.m')
+```
+
+The script processes channel B and writes plots, per-shot diagnostics, range
+peaks, known-target comparisons and a MAT workspace under
+`build/fmcw_analysis`. It runs both `allShots` and `activeOnly`, with the second
+selection excluding shots below 200 ADC codes AC RMS. Every original shot
+remains available for diagnostics. Change the cutoff or other settings through
+`fmcwOptions` before running.
+
+```matlab
+fmcwOptions = struct('quietRmsCodes', 200, 'figureVisible', 'off');
+run('scripts/analyze_fmcw.m')
+```
+
+Processing includes single-precision DC removal, optional linear detrending,
+rectangular/Hann/Blackman spectra, incoherent power averaging, 64-point
+CA-CFAR for the current 61-sample records, interpolated peaks, harmonic flags,
+and matched-gain empty-scene power comparisons. The analysis uses the corrected
+9, 15 and 24 ft log distances. Legacy outdoor CSV distances are unspecified.
+
+Ranges use the programmed slope. The report includes known-range gate metrics
+and the strongest overall peak. The configured CFAR false-alarm probability and
+candidate-screen thresholds require empirical validation. The current captures
+support range and acquisition-repeatability checks. Doppler requires timed,
+phase-coherent chirps, AoA requires populated calibrated receivers, and mapping
+requires synchronized pose data. `analysis_notes.txt` records the assumptions,
+metric definitions and processing references.
+
 ## Application buffers
 
 Use `chirp_capture_start()` or `chirp_capture_train_start()` followed by
