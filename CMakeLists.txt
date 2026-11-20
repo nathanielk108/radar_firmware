@@ -171,6 +171,7 @@ target_link_options(radar_firmware PRIVATE
   ${MCU_FLAGS}
   -T${LINKER_SCRIPT}
 
+  -Wl,--wrap=SDMMC_CmdAppOperCommand
   -Wl,--gc-sections
   -Wl,-Map=${CMAKE_BINARY_DIR}/radar_firmware.map
 

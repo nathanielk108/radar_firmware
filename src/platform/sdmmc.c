@@ -9,6 +9,7 @@
 
 #define SDMMC_CLOCK_HZ 48000000U
 #define SDMMC_TIMEOUT_MS 1000U
+#define SDMMC_INIT_READY_TIMEOUT_MS 1500U
 #define SDMMC_STAGE_SECTORS 8U
 #define SDMMC_DATA_ERRORS                                                      \
   (SDMMC_FLAG_DCRCFAIL | SDMMC_FLAG_DTIMEOUT | SDMMC_FLAG_TXUNDERR |             \
@@ -17,6 +18,7 @@
 static SD_HandleTypeDef sd;
 static bool socket_ready;
 static bool card_ready;
+static uint32_t init_started_ms;
 
 /* The firmware linker puts .bss in AXI SRAM. Keep entire private cache lines
  * here so SDMMC1 IDMA can transfer without touching any other object. */
@@ -62,6 +64,16 @@ bool sdmmc_present(void) {
 
 bool sdmmc_ready(void) { return card_ready && sdmmc_present(); }
 
+uint32_t __real_SDMMC_CmdAppOperCommand(SDMMC_TypeDef *instance, uint32_t arg);
+
+uint32_t __wrap_SDMMC_CmdAppOperCommand(SDMMC_TypeDef *instance, uint32_t arg) {
+  /* HAL bounds the number of ACMD41 retries. Limit the elapsed wait as well. */
+  if (!sdmmc_present() ||
+      time_expired(init_started_ms, SDMMC_INIT_READY_TIMEOUT_MS))
+    return SDMMC_ERROR_TIMEOUT;
+  return __real_SDMMC_CmdAppOperCommand(instance, arg);
+}
+
 void sdmmc_reset(void) {
   if (LL_AHB3_GRP1_IsEnabledClock(LL_AHB3_GRP1_PERIPH_SDMMC1)) {
     LL_AHB3_GRP1_ForceReset(LL_AHB3_GRP1_PERIPH_SDMMC1);
@@ -92,6 +104,7 @@ bool sdmmc_card_init(void) {
                .ClockDiv = 2U},
   };
   /* The vendor driver identifies the card on one bit at <=400 kHz first. */
+  init_started_ms = time_ms();
   if (HAL_SD_Init(&sd) != HAL_OK || !sdmmc_present()) {
     sdmmc_reset();
     return false;
