@@ -23,6 +23,8 @@ typedef enum {
 } firmware_rail_mode_t;
 
 bool firmware_init(void);
+/* Foreground motion and housekeeping. Charger I/O can wait for its bus,
+ * so service deadline-sensitive ADC blocks before calling this function. */
 void firmware_poll(void);
 firmware_status_t firmware_status(void);
 

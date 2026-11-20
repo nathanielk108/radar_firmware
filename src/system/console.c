@@ -178,15 +178,22 @@ static void motion_command(motion_sensor_t sensor, const char *name) {
   }
   motion_sample_t sample;
   result = motion_read(sensor, &sample);
-  if (result != MOTION_OK) {
+  if (result == MOTION_OK) {
+    reply("%s id=0x%02X t_us=%lu seq=%lu accel_ug=%ld,%ld,%ld gyro_mdps=%ld,%ld,%ld",
+          name, (unsigned)id, (unsigned long)sample.timestamp_us,
+          (unsigned long)sample.sequence,
+          (long)sample.accel_ug[0], (long)sample.accel_ug[1],
+          (long)sample.accel_ug[2], (long)sample.gyro_mdps[0],
+          (long)sample.gyro_mdps[1], (long)sample.gyro_mdps[2]);
+  } else {
     reply("%s id=0x%02X: %s", name, (unsigned)id, motion_status_name(result));
-    return;
   }
-  reply("%s id=0x%02X t=%lu ms accel_ug=%ld,%ld,%ld gyro_mdps=%ld,%ld,%ld",
-        name, (unsigned)id, (unsigned long)sample.timestamp_ms,
-        (long)sample.accel_ug[0], (long)sample.accel_ug[1],
-        (long)sample.accel_ug[2], (long)sample.gyro_mdps[0],
-        (long)sample.gyro_mdps[1], (long)sample.gyro_mdps[2]);
+  motion_stats_t stats;
+  if (motion_get_stats(sensor, &stats))
+    reply("%s drdy=%lu missed=%lu queued=%u queue_overruns=%lu io_errors=%lu",
+          name, (unsigned long)stats.drdy_events,
+          (unsigned long)stats.missed_events, (unsigned)stats.queued,
+          (unsigned long)stats.queue_overruns, (unsigned long)stats.io_errors);
 }
 
 static void adc_test(void) {

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define BOARD_CHIRP_MAX_STEPS 256U
-#define BOARD_CHIRP_MAX_COUNT 16U
+#define BOARD_CHIRP_MAX_COUNT 64U
 
 typedef struct {
   uint32_t adc_start_ticks;

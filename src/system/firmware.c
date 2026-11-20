@@ -47,7 +47,7 @@ static bool init_mcu(void) {
   core_enable_icache();
   core_enable_dcache();
   if (!time_init()) {
-    debug_swo_write("SysTick init failed\r\n");
+    debug_swo_write("Timebase init failed\r\n");
     return false;
   }
   return true;
@@ -132,11 +132,6 @@ bool firmware_init(void) {
   if (!usb_ready)
     LOG_ERROR("USB CDC init failed");
 
-  motion_init();
-  LOG_INFO("IMUs ISM330IS=%s BMI323=%s",
-           motion_ready(MOTION_ISM330IS) ? "ready" : "unavailable",
-           motion_ready(MOTION_BMI323) ? "ready" : "unavailable");
-
   storage_init();
   if (storage_present()) {
     storage_status_t status = storage_mount();
@@ -146,10 +141,13 @@ bool firmware_init(void) {
   board_freq_init();
   board_spi_adc_init();
   (void)firmware_rf_enable(true);
+  /* Start the IMU streams after the blocking SD and rail setup. */
+  motion_init();
   return true;
 }
 
 void firmware_poll(void) {
+  motion_poll();
   debug_swo_poll();
   if (usb_ready)
     usb_task();

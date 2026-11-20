@@ -36,7 +36,7 @@ bool acquisition_active(void);
   (ACQUISITION_TIMER_HZ / ACQUISITION_SAMPLE_RATE_HZ)
 #define ACQUISITION_CS_OFFSET_TICKS 384U
 #define ACQUISITION_MAX_BLOCK_SAMPLES 128U
-#define ACQUISITION_MAX_BURST_COUNT 16U
+#define ACQUISITION_MAX_BURST_COUNT 64U
 
 typedef struct {
   uint32_t sample_rate_hz;
@@ -44,10 +44,14 @@ typedef struct {
 } acquisition_timed_config_t;
 
 typedef struct {
+  /* Read-only Q15 channel views into 32-byte-aligned DMA memory. */
   const int16_t *a;
   const int16_t *b;
+  uint32_t sequence; /* Stream block or chirp capture identifier. */
+  uint32_t first_sample_us; /* Nominal time_us() of the first valid conversion. */
+  uint32_t sample_rate_hz;
   uint16_t count;
-  uint32_t sequence;
+  bool timestamp_valid;
 } acquisition_block_t;
 
 /* Configure continuous capture. Exclusive with burst and polling ADC access.
@@ -57,15 +61,18 @@ acquisition_status_t
 acquisition_timed_init(const acquisition_timed_config_t *config);
 acquisition_status_t acquisition_timed_start(void);
 
-/* Stop the timer first, then SPI and DMA. A fully completed block remains
- * readable through acquisition_timed_get_block() until the next start/init.
+/* Stop the timer first, then SPI and DMA. A published block remains readable
+ * through get_block() until release, restart or deinit, provided no overrun
+ * occurred. Call deinit before switching back to burst or polling mode.
  */
 acquisition_status_t acquisition_timed_stop(void);
 
 /* ACQUISITION_BUSY means no *new complete paired* block is available.
  * The views expire when DMA switches back to their target or at the next
- * start. Release each block before the next block completes. If DMA catches
- * up first, OVERRUN stops sampling and invalidates the outstanding block.
+ * start. Release each block before the next block completes. Commit any
+ * processing result only after release succeeds. OVERRUN stops sampling and
+ * invalidates the outstanding block. Stop and restart to resume the stream.
+ * All stream control and buffer access are for foreground code.
  */
 acquisition_status_t acquisition_timed_get_block(acquisition_block_t *block);
 acquisition_status_t acquisition_timed_release_block(uint32_t sequence);
@@ -87,7 +94,8 @@ acquisition_status_t acquisition_burst_train_arm(uint16_t samples,
 
 /* Return aligned signed ADC views after both DMA streams and TIM16 finish.
  * For a train, the returned view describes the first block. Views are valid
- * until the next burst arm. Each block skips its stale word.
+ * until the next burst arm. Each block skips its stale word. Raw external
+ * triggers have no software timestamp. Use the chirp service for timed RF.
  */
 acquisition_status_t acquisition_burst_finish(acquisition_block_t *block);
 

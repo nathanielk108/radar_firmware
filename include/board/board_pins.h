@@ -62,6 +62,8 @@
 
 #define IMU1_CS_PORT GPIOC
 #define IMU1_CS_PIN 4U
+#define IMU1_DRDY_PORT GPIOC
+#define IMU1_DRDY_PIN 5U /* ISM330IS INT2 */
 
 #define IMU2_SPI SPI2
 
@@ -79,6 +81,8 @@
 
 #define IMU2_CS_PORT GPIOB
 #define IMU2_CS_PIN 12U
+#define IMU2_DRDY_PORT GPIOG
+#define IMU2_DRDY_PIN 4U /* BMI323 INT1 */
 
 #define FREQ_LE_PORT GPIOA
 #define FREQ_LE_PIN 3U

@@ -3,6 +3,8 @@
 #include "board/board_spi.h"
 #include "stm32h7xx_ll_gpio.h"
 
+#define ISM330IS_DRDY_PULSED_REG 0x0BU
+#define ISM330IS_INT2_CTRL 0x0EU
 #define ISM330IS_CTRL1_XL 0x10U
 #define ISM330IS_CTRL3_C 0x12U
 #define ISM330IS_STATUS_REG 0x1EU
@@ -11,6 +13,8 @@
 #define ISM330IS_ODR_833_HZ (7U << 4)
 #define ISM330IS_BDU (1U << 6)
 #define ISM330IS_IF_INC (1U << 2)
+#define ISM330IS_DRDY_PULSED (1U << 7)
+#define ISM330IS_INT2_DRDY_G (1U << 1)
 
 static ism330is_status_t map_spi_status(spi_status_t status) {
   switch (status) {
@@ -85,6 +89,14 @@ ism330is_status_t ism330is_init(void) {
 
   const uint8_t ctrl3[] = {ISM330IS_CTRL3_C, ISM330IS_BDU | ISM330IS_IF_INC};
   status = transfer(ctrl3, NULL, sizeof(ctrl3));
+  if (status != ISM330IS_OK)
+    return status;
+  const uint8_t drdy[] = {ISM330IS_DRDY_PULSED_REG, ISM330IS_DRDY_PULSED};
+  status = transfer(drdy, NULL, sizeof(drdy));
+  if (status != ISM330IS_OK)
+    return status;
+  const uint8_t int2[] = {ISM330IS_INT2_CTRL, ISM330IS_INT2_DRDY_G};
+  status = transfer(int2, NULL, sizeof(int2));
   if (status != ISM330IS_OK)
     return status;
 

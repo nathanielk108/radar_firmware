@@ -8,10 +8,16 @@
 #define BMI323_GYR_CONF 0x21U
 #define BMI323_STATUS 0x02U
 #define BMI323_ACC_DATA_X 0x03U
+#define BMI323_IO_INT_CTRL 0x38U
+#define BMI323_INT_CONF 0x39U
+#define BMI323_INT_MAP2 0x3BU
 #define BMI323_DATA_READY 0xC0U /* drdy_acc and drdy_gyr */
 #define BMI323_NORMAL_MODE (4U << 12)
 #define BMI323_RANGE_250_DPS (1U << 4)
 #define BMI323_ODR_800_HZ 0x0BU
+#define BMI323_INT1_ACTIVE_HIGH (1U << 0)
+#define BMI323_INT1_OUTPUT_ENABLE (1U << 2)
+#define BMI323_GYR_DRDY_ON_INT1 (1U << 8)
 
 static uint16_t pending_data;
 
@@ -103,6 +109,18 @@ bmi323_status_t bmi323_init(void) {
     return status;
   if ((id & 0xFFU) != BMI323_CHIP_ID_VAL)
     return BMI323_ERROR_DEVICE_ID;
+
+  /* Active-high push-pull gyro data-ready pulses on board-wired INT1. */
+  status = write_reg(BMI323_IO_INT_CTRL, BMI323_INT1_ACTIVE_HIGH |
+                                            BMI323_INT1_OUTPUT_ENABLE);
+  if (status != BMI323_OK)
+    return status;
+  status = write_reg(BMI323_INT_CONF, 0U);
+  if (status != BMI323_OK)
+    return status;
+  status = write_reg(BMI323_INT_MAP2, BMI323_GYR_DRDY_ON_INT1);
+  if (status != BMI323_OK)
+    return status;
 
   /* Use ±2 g and ±250 dps. Both sensors run in continuous normal mode. */
   status = write_reg(BMI323_ACC_CONF, BMI323_NORMAL_MODE | BMI323_ODR_800_HZ);

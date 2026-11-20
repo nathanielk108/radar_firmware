@@ -6,6 +6,9 @@
 bool time_init(void);
 
 uint32_t time_ms(void);
+/* Shared ADC and IMU clock. Subtract as unsigned values across the 2^32 us
+ * wrap to measure intervals shorter than one wrap. */
+uint32_t time_us(void);
 uint32_t time_elapsed_ms(uint32_t start);
 bool time_expired(uint32_t start, uint32_t duration);
 

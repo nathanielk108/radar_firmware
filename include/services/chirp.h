@@ -18,6 +18,7 @@ typedef struct {
   uint32_t repetition_ticks;        /* Zero for a standalone chirp. */
   uint16_t chirp_count;
   uint16_t sample_stride; /* int16_t items between successive chirp views. */
+  uint16_t gain_mv;        /* Nominal IF gain-control voltage for this capture. */
 } chirp_capture_t;
 
 /* Foreground only. Start makes one capture pending and returns immediately
@@ -30,7 +31,11 @@ acquisition_status_t chirp_capture_train_start(uint16_t chirp_count,
 acquisition_status_t chirp_capture_poll(chirp_capture_t *capture);
 acquisition_status_t chirp_capture_cancel(void);
 
-/* Run one board-profile chirp. All sample views are read-only and valid until
- * the next ADC burst is armed. For train index i, each channel begins at
- * samples.a/b + i * sample_stride and has samples.count samples. */
+/* Get an aligned DMA view of one chirp. Its sequence identifies the entire
+ * capture. Timestamp is nominal, derived from the timer start and repetition
+ * interval. Views remain valid until the next ADC burst is armed. */
+bool chirp_capture_get_block(const chirp_capture_t *capture, uint16_t index,
+                             acquisition_block_t *block);
+
+/* Run one board-profile chirp, waiting for settling and capture. */
 acquisition_status_t chirp_capture_one(chirp_capture_t *capture);

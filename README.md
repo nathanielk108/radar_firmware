@@ -7,14 +7,15 @@ and FatFs.
 
 1. Inhibit charging, hold the display in reset with its backlight off, and
    disable the RF rails while the MCU clock, SysTick, MPU and caches start.
-2. Configure the BQ25883, ISM330IS and BMI323. Mount a preformatted microSD card
-   if present at boot.
+2. Start the shared microsecond clock on TIM5, configure the BQ25883, and
+   mount a preformatted microSD card if present at boot.
 3. Try the RF board's 5 V rail, then its 15 V rail. After the rails settle,
    put the ADF4158 in software power-down. Configure the AD4683 for two-wire
    output with its external 3.3 V reference, then initialize its timer and DMA.
    Set the VGA DAC to 2.5 V on success. If ADC initialization fails, turn off
    both RF rails and continue in digital-only mode.
-4. Start USB CDC when the charger reports qualified VBUS. Open the native USB
+4. Start the ISM330IS and BMI323 motion streams.
+5. Start USB CDC when the charger reports qualified VBUS. Open the native USB
    port to read the queued boot status messages. The PCB's PA9 VBUS divider
    produces about 1.6 V at 5 V input, so firmware uses the BQ25883 power-good
    signal on PG1 for USB attach and detach.
@@ -198,28 +199,48 @@ phase-coherent chirps, AoA requires populated calibrated receivers, and mapping
 requires synchronized pose data. `analysis_notes.txt` records the assumptions,
 metric definitions and processing references.
 
-## Application buffers
+## Application hardware interfaces
 
-Use `chirp_capture_start()` or `chirp_capture_train_start()` followed by
-`chirp_capture_poll()`. The PLL settle wait leaves foreground services running.
-The timers and DMA pace the train. Each train interval has 120 sweep edges,
-64 ADC frames, and a reset edge after the ADC window. Verify the actual RF
-tracking, chirp-to-chirp phase repeatability, and reset settling on the assembled
-RF board before using the train for coherent processing.
+Initialize the board with `firmware_init()`. Check `firmware_status().radar_ready`
+and `motion_ready()` before using each sensor. The acquisition APIs run in the
+foreground. Keep one consumer for each stream and finish reading a view within
+its documented lifetime.
 
-A completed capture exposes two 32-byte-aligned, read-only `int16_t` arrays
-directly from non-cacheable D2 SRAM. Each chirp has `samples.count` valid
-samples per channel and starts at `chirp_index * sample_stride`. The views
-remain valid until the next burst is armed. Use them directly as raw Q15 data,
-or convert into cacheable CMSIS-DSP scratch buffers when a kernel modifies its
-input. Pass the capture to `recording_capture()` before reusing its views.
+**Radar.** Use `chirp_capture_start()` or `chirp_capture_train_start()`, then
+call `chirp_capture_poll()` until it returns a result. `chirp_capture_get_block()`
+provides read-only channel A and B views for each chirp, as signed ADC codes in
+32-byte-aligned, non-cacheable D2 SRAM. Process them before the next ADC burst
+is armed. Convert directly into working storage if a CMSIS-DSP kernel
+requires writable or floating-point input.
 
-Continuous acquisition uses paired ping-pong DMA and discards the initial
-priming block. Release each view with `acquisition_timed_release_block()`
-before the next block completes. A 128-sample block at 400 kSPS gives a 320 µs
-budget. Treat overruns as discontinuities. The SD recorder is for completed
-bursts and trains. Indefinite raw logging during continuous capture needs a
-separate throughput and latency qualification.
+Each capture carries the programmed gain, sweep and relative hardware timing.
+The sample rate remains 400 kSPS. A 64-chirp train at a 781 µs interval
+covers approximately 50 ms. Each train also incurs a 20 ms PLL settle.
+Verify RF sweep tracking, reset settling, and phase repeatability on the
+assembled RF board before coherent processing.
+
+**Motion.** `firmware_poll()` collects samples from both IMUs. The application
+can call `motion_poll()` directly when servicing time-sensitive work. Use
+`motion_peek()` and `motion_pop()` to consume raw samples in order without
+copying. Each IMU queues up to 64 samples with a timestamp and sequence.
+Finish reading a sample before the next poll or pop.
+`motion_profile()` gives the scale and nominal rate. `motion_get_stats()`
+reports missed events, queue overruns, and SPI errors. `motion_read()`
+provides the latest scaled reading for diagnostics. Axes are sensor-native.
+
+**Timing and scheduling.** Radar and motion timestamps use `time_us()`, a
+32-bit microsecond counter that wraps about every 72 minutes. Use unsigned
+subtraction for elapsed intervals. Radar timestamps are nominal sample times
+derived from timer start. Motion timestamps record the gyro data-ready
+interrupt. Use the capture timer ticks for precise relative radar timing.
+
+Continuous ADC acquisition uses paired ping-pong DMA. Read and release each
+block before the next one completes. Discard its processing result if release
+fails. A 128-sample block gives 320 µs at 400 kSPS. Charger, console, and SD
+calls can exceed that budget, so schedule housekeeping between captures.
+Use burst capture when recording to SD. The optional `recording_capture()`
+copies a finished view into its queue for deferred writing. RDR1 files
+carry chirp-relative timing.
 
 ## Build
 
