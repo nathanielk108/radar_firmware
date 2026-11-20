@@ -1,3 +1,4 @@
+#include "app/radar_run.h"
 #include "platform/debug_swo.h"
 #include "services/recording.h"
 #include "stm32h7xx.h"
@@ -14,6 +15,7 @@ int main(void) {
   for (;;) {
     firmware_poll();
     console_poll();
+    radar_run_poll();
     recording_task();
   }
 }

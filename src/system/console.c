@@ -1,5 +1,6 @@
 #include "system/console.h"
 
+#include "app/radar_run.h"
 #include "dsp/transform_functions.h"
 #include "platform/fault.h"
 #include "platform/time.h"
@@ -26,7 +27,6 @@ static size_t line_length;
 static bool line_overflow;
 static bool waiting_for_capture;
 static bool print_csv;
-static uint16_t capture_gain_mv;
 static char csv[1536];
 static size_t csv_size;
 static uint32_t reported_saved;
@@ -46,18 +46,22 @@ static void reply(const char *format, ...) {
 }
 
 static bool capture_active(void) {
-  return waiting_for_capture || chirp_capture_active() || acquisition_active();
+  return waiting_for_capture || chirp_capture_active() || acquisition_active() ||
+         radar_run_status().state == RADAR_RUN_RUNNING;
 }
 
 static void format_csv(const chirp_capture_t *capture) {
   int length = snprintf(csv, sizeof(csv),
                         "# sample_rate_hz=%lu,step_hz=%lu,step_rate_hz=%lu,"
-                        "samples=%u,gain_mv=%u\r\nindex,adc_a,adc_b\r\n",
+                        "samples=%u,gain_mv=%u,sequence=%lu,"
+                        "first_sample_us=%lu\r\nindex,adc_a,adc_b\r\n",
                         (unsigned long)capture->sample_rate_hz,
                         (unsigned long)capture->step_hz,
                         (unsigned long)capture->step_rate_hz,
                         (unsigned)capture->samples.count,
-                        (unsigned)capture_gain_mv);
+                        (unsigned)capture->gain_mv,
+                        (unsigned long)capture->samples.sequence,
+                        (unsigned long)capture->samples.first_sample_us);
   if (length < 0 || (size_t)length >= sizeof(csv))
     return;
   size_t used = (size_t)length;
@@ -77,7 +81,7 @@ static void start_capture(bool usb_csv, uint16_t count, uint32_t interval_us) {
     reply("RADAR busy");
     return;
   }
-  if (!firmware_gain_get(&capture_gain_mv)) {
+  if (!firmware_status().radar_ready) {
     reply("RADAR unavailable; attach RF board and use rf on");
     return;
   }
@@ -110,8 +114,7 @@ static void finish_capture(void) {
   }
   if (print_csv && usb_console_connected())
     format_csv(&capture);
-  if ((!print_csv || storage_mounted()) &&
-      !recording_capture(&capture, capture_gain_mv))
+  if ((!print_csv || storage_mounted()) && !recording_capture(&capture))
     reply("RADAR capture complete; SD queue full");
 }
 
@@ -328,6 +331,79 @@ static bool parse_unsigned(const char *value, uint32_t max, uint32_t *result) {
   return true;
 }
 
+static void run_status_command(void) {
+  radar_run_status_t run = radar_run_status();
+  if (run.output == RADAR_RUN_OUTPUT_USB) {
+    reply("USB run %s %u/%u queued capture=%s",
+          radar_run_state_name(run.state), (unsigned)run.saved,
+          (unsigned)run.captures, acquisition_status_name(run.capture_error));
+    return;
+  }
+  reply("Run %s %u/%u manifest=%s capture=%s sd=%s",
+        radar_run_state_name(run.state), (unsigned)run.saved,
+        (unsigned)run.captures, run.path[0] ? run.path : "-",
+        acquisition_status_name(run.capture_error),
+        storage_status_name(run.storage_error));
+}
+
+static void run_command(const char *tag, const char *count_arg,
+                        radar_run_output_t output) {
+  if (output == RADAR_RUN_OUTPUT_SD && !count_arg &&
+      (!tag || !strcmp(tag, "status"))) {
+    run_status_command();
+    return;
+  }
+  if (output == RADAR_RUN_OUTPUT_SD && !count_arg && !strcmp(tag, "stop")) {
+    reply(radar_run_stop() ? "Run stop requested" : "Run idle");
+    return;
+  }
+  const char *chirps_arg = strtok(NULL, " \t");
+  const char *interval_arg = strtok(NULL, " \t");
+  const char *gap_arg = strtok(NULL, " \t");
+  uint32_t count, chirps = 1U;
+  radar_run_config_t config = {.output = output};
+  if (!tag || !parse_unsigned(count_arg, RADAR_RUN_MAX_CAPTURES, &count) ||
+      (chirps_arg && !parse_unsigned(chirps_arg, CHIRP_MAX_COUNT, &chirps)) ||
+      strlen(tag) > RADAR_RUN_TAG_LENGTH || strtok(NULL, " \t"))
+    goto invalid;
+  config.captures = (uint16_t)count;
+  config.chirps = (uint16_t)chirps;
+  config.interval_us = chirps > 1U ? 1000U : 0U;
+  if ((interval_arg && !parse_unsigned(interval_arg, CHIRP_MAX_REPETITION_US,
+                                       &config.interval_us)) ||
+      (gap_arg && !parse_unsigned(gap_arg, RADAR_RUN_MAX_GAP_MS, &config.gap_ms)))
+    goto invalid;
+  memcpy(config.tag, tag, strlen(tag) + 1U);
+  if (capture_active() || csv_size) {
+    reply("RADAR busy");
+    return;
+  }
+  switch (radar_run_start(&config)) {
+  case RADAR_RUN_START_OK:
+    reply("Run accepted, tag=%s captures=%u chirps=%u interval_us=%lu gap_ms=%lu",
+          config.tag, (unsigned)config.captures, (unsigned)config.chirps,
+          (unsigned long)config.interval_us, (unsigned long)config.gap_ms);
+    return;
+  case RADAR_RUN_START_BUSY:
+    reply("RADAR busy");
+    return;
+  case RADAR_RUN_START_RF_UNAVAILABLE:
+    reply("RADAR unavailable; attach RF board and use rf on");
+    return;
+  case RADAR_RUN_START_SD_UNAVAILABLE:
+    reply("Mount an SD card with sd mount before starting a run");
+    return;
+  case RADAR_RUN_START_USB_UNAVAILABLE:
+    reply("USB console unavailable; open it before starting a run");
+    return;
+  case RADAR_RUN_START_INVALID:
+    break;
+  }
+invalid:
+  reply("%s <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop",
+        output == RADAR_RUN_OUTPUT_USB ? "run-usb" : "run");
+}
+
 static void rails_command(const char *arg) {
   if (arg) {
     firmware_rail_mode_t mode;
@@ -377,6 +453,16 @@ static void dispatch(char *command) {
           "rf on|off | g [mV] | c | "
           "save [chirps [interval_us]] | sd mount|eject|test | "
           "test adc|stream|dsp|lcd | lcd off | bl [0-100] | echo <text>");
+    reply("run <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop");
+    reply("run-usb <tag> <captures> [chirps [interval_us [gap_ms]]]");
+    return;
+  }
+  if (!strcmp(name, "run")) {
+    run_command(arg, extra, RADAR_RUN_OUTPUT_SD);
+    return;
+  }
+  if (!strcmp(name, "run-usb")) {
+    run_command(arg, extra, RADAR_RUN_OUTPUT_USB);
     return;
   }
   if (!strcmp(name, "status") && !arg) {
@@ -488,7 +574,8 @@ void console_poll(void) {
   recording_status_t log = recording_status();
   if (log.captures_saved != reported_saved) {
     reported_saved = log.captures_saved;
-    reply("Saved %s", log.last_capture);
+    if (radar_run_status().state != RADAR_RUN_RUNNING)
+      reply("Saved %s", log.last_capture);
   }
 
   char input[32];

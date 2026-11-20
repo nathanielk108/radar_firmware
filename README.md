@@ -38,7 +38,9 @@ The `c` single-chirp shortcut works without Enter.
 | `rails [5v\|on\|off]` | Read regulator enable states, enable just 5 V or both regulators for bench testing, or shut down both and disable the LCD and RF services. |
 | `rf on`, `rf off`, `g [mV]` | Probe or disable the RF board and configure IF gain. |
 | `c` | Send one chirp as USB CSV. Also queue the raw capture if SD is mounted. |
-| `save [chirps [interval_us]]` | Save one complete capture to SD. Train limits are 2–16 chirps at intervals of 500–10000 µs. The default interval is 1000 µs. |
+| `save [chirps [interval_us]]` | Save one complete capture to SD. Train limits are 2–64 chirps at intervals of 500–10000 µs. The default interval is 1000 µs. |
+| `run <tag> <captures> [chirps [interval_us [gap_ms]]]` | Record a named sequence of FMCW captures to SD. Use `run status` to check progress and `run stop` to stop. |
+| `run-usb <tag> <captures> [chirps [interval_us [gap_ms]]]` | Stream the same capture data over the native USB console. Use the host collector to save a run without an SD card. |
 | `sd mount`, `sd test`, `sd eject` | Mount an existing FAT volume, write and read back a new scratch file, or flush and unmount. |
 | `test dsp`, `test adc`, `test stream` | Check the CMSIS-DSP real FFT, a finite ADC-only DMA capture, or one second of continuous ADC DMA with USB and charger tasks active. |
 | `test lcd`, `bl [0–100]`, `lcd off` | Draw solid RGB565 bars, read or set the backlight PWM duty in percent, or disable the panel. |
@@ -66,6 +68,77 @@ python scripts/read_radar_capture.py C0000000.BIN --output train.csv
 python scripts/read_radar_capture.py C0000000.BIN --chirp 0 --output chirp.csv
 python scripts/plot_chirp_spectrum.py chirp.csv
 ```
+
+## FMCW characterization runs
+
+Mount the card with `sd mount` and check that `status` shows `radar=1` and
+`sd_mounted=1`. Set the IF gain with `g` before each run. For example, collect
+100 single chirps with no reflector, then repeat with one reflector at 15 ft
+without moving the radar. Collect 64-chirp trains as a separate run.
+
+```text
+g 2200
+run empty 100
+run target15ft 100
+run train15ft 32 64 781
+run status
+```
+
+Wait for each run to finish before starting the next. A run accepts 1–1000
+captures with a 1–16 character tag using letters, digits, underscores, and
+hyphens. Each capture defaults to one chirp. For trains, the default chirp
+interval is 1000 µs. Use interval 0 when specifying a gap for single chirps,
+for example `run target15ft 100 1 0 50`. The optional gap is 0–60000 ms after
+each write. Timing between captures includes PLL settling and SD latency.
+
+`run status` shows the manifest filename and completed count. The run
+continues after USB disconnect. `run stop` cancels the in-flight capture
+and preserves the completed ones. Use `sd eject` after the run finishes.
+
+Each `Rnnnnnnn.CSV` manifest records the tag, run settings, saved filenames,
+capture sequence, and nominal first-sample timestamps. Timestamps are local
+microseconds and wrap after about 72 minutes. Keep the manifest and its
+`Cnnnnnnn.BIN` files together. The binaries contain both signed ADC channels
+for every retained sample, including quiet captures. The run contains FMCW
+data only. Hardware spacing is defined within each train.
+
+```sh
+python scripts/read_radar_capture.py --manifest R0000000.CSV --output target15ft
+python scripts/read_radar_capture.py --manifest R0000001.CSV --chirp 0 --output first_chirps
+```
+
+Use the filename reported by the console and a new output directory. The
+export validates each indexed binary and preserves the manifest. Full trains
+export with a chirp index. `--chirp 0` exports the first chirp from each
+capture in the format used by `chirp_range.py` and `plot_chirp_spectrum.py`.
+After an interruption, the exporter reports the run status and recovers
+complete manifest rows. If SD fails between saving a binary and updating
+the manifest, decode any complete unindexed binary by filename.
+
+The application lives in `src/app/radar_run.c` and uses the foreground chirp
+and storage services. It waits for the SD result before rearming the ADC.
+The recorder packs the borrowed DMA view into its existing staging buffer
+for a contiguous write and returns the filename after close.
+
+### Recording a run over USB
+
+Connect the RF board and the digital board's native USB console. Close any
+serial terminal before running the collector. Install `pyserial` if needed,
+substitute the port Windows assigned, and choose a new output directory.
+
+```sh
+python -m pip install pyserial
+python scripts/capture_radar_usb.py COM13 empty -n 100 -o data/usb-empty
+python scripts/capture_radar_usb.py COM13 train15ft -n 20 --chirps 64 --interval-us 781 -o data/usb-train15ft
+python scripts/read_radar_capture.py --manifest data/usb-train15ft/R0000000.CSV --output data/usb-train15ft-csv
+```
+
+The collector sends `run-usb` and writes the standard manifest and binary
+captures to the PC. The firmware queues each finished capture before arming
+the next one. USB transfer time can change the gap between captures. Timing
+within each train still comes from the radar hardware timers. Closing the port
+stops the USB run, and the collector keeps each complete capture it verified.
+The `c` shortcut provides human-readable CSV for a single chirp.
 
 ## USB-C charging
 

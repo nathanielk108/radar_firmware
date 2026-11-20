@@ -40,6 +40,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Firmware
 set(FIRMWARE_SOURCES
   src/main.c
+  src/app/radar_run.c
   src/platform/clock.c
   src/platform/core.c
   src/platform/debug_swo.c
