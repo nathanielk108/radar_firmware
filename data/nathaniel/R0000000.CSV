@@ -1,0 +1,6 @@
+# radar_run=1,tag=benchesingle,gain_mv=2500,captures=3,chirps=1,interval_us=0,gap_ms=0
+index,file,sequence,first_sample_us
+1,C0000000.BIN,1,36909005
+2,C0000001.BIN,2,36945003
+3,C0000002.BIN,3,36981003
+# status=complete,saved=3

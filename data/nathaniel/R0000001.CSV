@@ -1,0 +1,6 @@
+# radar_run=1,tag=benchtrain,gain_mv=2500,captures=3,chirps=64,interval_us=781,gap_ms=0
+index,file,sequence,first_sample_us
+1,C0000003.BIN,4,37047004
+2,C0000004.BIN,5,37144004
+3,C0000005.BIN,6,37240005
+# status=complete,saved=3
