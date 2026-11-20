@@ -1,0 +1,67 @@
+[0] INF RADAR boot; send help over USB CDC
+[11] INF BQ25883: configured with charging inhibited
+[41] INF SD mount: OK
+[441] ERR AD4683: configuration readback mismatch
+[441] INF RF stopped; 5v_en=0 15v_en=0
+[441] INF ISM330IS: ready
+[441] INF BMI323: ready
+[441] INF USB-C: CC1 918 mV, CC2 0 mV, advertised 1500 mA
+[544] INF BQ25883: input limit 1500 mA, charging inhibited
+[662] INF BQ25883: input limit 1500 mA, charging enabled
+[972] INF BQ25883: input limit 1500 mA, charging inhibited
+[1037] INF BQ25883: input limit 500 mA, charging inhibited
+[1143] INF BQ25883: input limit 1500 mA, charging inhibited
+[1374] INF BQ25883: input limit 500 mA, charging inhibited
+[1734] INF USB-C: CC1 912 mV, CC2 0 mV, advertised 1500 mA
+[1836] INF BQ25883: input limit 1500 mA, charging inhibited
+[1997] INF BQ25883: input limit 1500 mA, charging enabled
+[2271] INF BQ25883: input limit 1500 mA, charging inhibited
+[2561] INF BQ25883: input limit 500 mA, charging inhibited
+[2665] INF BQ25883: input limit 1500 mA, charging inhibited
+[2958] INF BQ25883: input limit 1500 mA, charging enabled
+[3272] INF BQ25883: input limit 1500 mA, charging inhibited
+[3473] INF BQ25883: input limit 500 mA, charging inhibited
+[3580] INF BQ25883: input limit 1500 mA, charging inhibited
+[5556] INF BQ25883: input limit 500 mA, charging inhibited
+[5662] INF BQ25883: input limit 1500 mA, charging inhibited
+[0] INF RADAR boot; send help over USB CDC
+[11] INF BQ25883: configured with charging inhibited
+[41] INF SD mount: OK
+[441] INF RADAR ADC ready; PLL in software power-down
+[441] INF ISM330IS: ready
+[441] INF BMI323: ready
+[441] INF USB-C: CC1 931 mV, CC2 0 mV, advertised 1500 mA
+[544] INF BQ25883: input limit 1500 mA, charging inhibited
+[657] INF BQ25883: input limit 1500 mA, charging enabled
+uptime=9325 ms usb=ready vbus=1 charging_allowed=1 efuse_pg=1 imu1=1 imu2=1 radar=1 lcd=0 sd_present=1 sd_mounted=1 5v_en=1 15v_en=1
+sd_saved=0 pending=0 dropped=0 log_dropped=0 io_errors=0 last_error=OK last_file=-
+status | power [adc] | rails [5v|on|off] | imu [1|2] | rf on|off | g [mV] | c | save [chirps [interval_us]] | sd mount|eject|test | test adc|stream|dsp|lcd | lcd off | bl [0-100] | echo <text>
+run <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop
+BQ25883 ADC age_ms=203 vbus_mv=4847 vbat_mv=8175 vsys_mv=8170 ibus_ma=1159 ichg_ma=0 ts_permille=649 tdie_mc=32500 charge_state=4 ts_status=0 fault=0x00
+SD mount: OK
+run <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop
+Run accepted, tag=cyrus1 captures=100 chirps=1 interval_us=0 gap_ms=0
+[83989] INF Run R0000000.CSV started, tag=cyrus1
+[84371] INF BQ25883: input limit 1500 mA, charging inhibited
+[84664] INF BQ25883: input limit 1500 mA, charging enabled
+[84983] INF BQ25883: input limit 1500 mA, charging inhibited
+[85715] INF BQ25883: input limit 1500 mA, charging enabled
+[86048] INF BQ25883: input limit 1500 mA, charging inhibited
+[86681] INF BQ25883: input limit 1500 mA, charging enabled
+[90126] INF Run R0000000.CSV complete 100/100 capture=OK sd=OK
+Saved C0000099.BIN
+[90168] INF BQ25883: input limit 1500 mA, charging inhibited
+[90399] INF BQ25883: input limit 1500 mA, charging enabled
+[91328] INF BQ25883: input limit 1500 mA, charging inhibited
+Unknown command; send help
+Run accepted, tag=cyrus2 captures=100 chirps=1 interval_us=0 gap_ms=0
+[135830] INF Run R0000001.CSV started, tag=cyrus2
+[142439] INF Run R0000001.CSV complete 100/100 capture=OK sd=OK
+Saved C0000199.BIN
+run <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop
+run <tag> <captures> [chirps [interval_us [gap_ms]]] | run status | run stop
+Unknown command; send help
+Run accepted, tag=cyrus3 captures=100 chirps=1 interval_us=0 gap_ms=0
+[185333] INF Run R0000002.CSV started, tag=cyrus3
+[191336] INF Run R0000002.CSV complete 100/100 capture=OK sd=OK
+Saved C0000299.BIN
