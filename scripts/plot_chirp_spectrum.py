@@ -49,7 +49,7 @@ def main():
     parser.error("install NumPy and Matplotlib with "
                  "`python -m pip install numpy matplotlib`")
 
-  data_dir = Path(__file__).resolve().parents[1] / "data"
+  data_dir = Path(__file__).resolve().parents[1] / "data" / "courtyard"
   captures = args.csv or [data_dir / name for name in OUTDOOR_CAPTURES]
   channel_index = ("a", "b").index(args.channel)
 
